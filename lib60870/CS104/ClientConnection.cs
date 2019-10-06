@@ -197,6 +197,9 @@ namespace lib60870.CS104
 
             this.fileServer = new FileServer(this, server.GetAvailableFiles(), DebugLog);
 
+            if (server.fileTimeout != null)
+                this.fileServer.Timeout = (long) server.fileTimeout;
+
             this.fileServer.SetFileReadyHandler (server.fileReadyHandler, server.fileReadyHandlerParameter);
 
             Thread workerThread = new Thread(HandleConnection);
@@ -254,7 +257,6 @@ namespace lib60870.CS104
         }
 
         private Socket socket;
-        //private NetworkStream socketStream;
         private Stream socketStream;
 
         private bool running = false;
@@ -758,8 +760,8 @@ namespace lib60870.CS104
                 messageHandled = fileServer.HandleFileAsdu(asdu);
 
             if ((messageHandled == false) && (server.asduHandler != null))
-            if (server.asduHandler(server.asduHandlerParameter, this, asdu))
-                messageHandled = true;
+                if (server.asduHandler(server.asduHandlerParameter, this, asdu))
+                    messageHandled = true;
 
             if (messageHandled == false)
             {
@@ -1211,7 +1213,7 @@ namespace lib60870.CS104
                         {
                             // Receive the response from the remote device.
                             int bytesRec = receiveMessage(bytes);
-							
+
                             if (bytesRec > 0)
                             {
 							
