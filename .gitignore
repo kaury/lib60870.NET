@@ -1,0 +1,10 @@
+[Oo]bj/
+[Dd]ebug/
+.vs/
+packages/
+
+*.rar
+
+*.pdb
+*.cd
+*.csproj.user

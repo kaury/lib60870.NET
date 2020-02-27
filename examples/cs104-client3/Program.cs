@@ -121,7 +121,7 @@ namespace cs104_client3
 			Console.WriteLine ("Using lib60870.NET version " + LibraryCommon.GetLibraryVersionString ());
 
 			//Connection con = new Connection ("10.0.4.6");
-			Connection con = new Connection ("127.0.0.1");
+			Connection con = new Connection ("192.168.1.2");
 
 			con.DebugOutput = true;
 
