@@ -987,7 +987,13 @@ namespace lib60870.CS101
 
                     break;
 
-            /* 41 - 44 reserved */
+                /* 41 - 44 reserved */
+
+                case TypeID.M_FT_NA_1:/* 42 - 104-œ∏‘Ú*/
+
+                    retVal = new EventOfFault(parameters, payload, 0);
+
+                    break;
 
                 case TypeID.C_SC_NA_1: /* 45 */
 

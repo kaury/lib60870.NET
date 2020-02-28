@@ -67,6 +67,7 @@ namespace lib60870.CS101
         M_EP_TD_1 = 38,
         M_EP_TE_1 = 39,
         M_EP_TF_1 = 40,
+        M_FT_NA_1 = 42,
         C_SC_NA_1 = 45,
         C_DC_NA_1 = 46,
         C_RC_NA_1 = 47,
@@ -101,7 +102,15 @@ namespace lib60870.CS101
         F_AF_NA_1 = 124,
         F_SG_NA_1 = 125,
         F_DR_TA_1 = 126,
-        F_SC_NB_1 = 127
+        F_SC_NB_1 = 127,
+        C_SR_NA_1 = 200,
+        C_RR_NA_1 = 201,
+        C_RS_NA_1 = 202,
+        C_WS_NA_1 = 203,
+        M_IT_NB_1 = 206,
+        M_IT_TC_1 = 207,
+        F_FR_NA_1_210 = 210,
+        F_SR_NA_1_211 = 211
     }
-	
+
 }
