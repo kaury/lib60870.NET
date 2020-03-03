@@ -55,14 +55,11 @@ namespace lib60870.CS101
         /// <summary>
         /// Value of DIR bit when sending messages.
         /// </summary>
-        public bool DIR
-        {
-            get
-            {
+        public bool DIR {
+            get {
                 return linkLayer.DIR;
             }
-            set
-            {
+            set {
                 linkLayer.DIR = value;
             }
         }
@@ -112,14 +109,11 @@ namespace lib60870.CS101
             }
         }
 
-        public int OwnAddress
-        {
-            get
-            {
+        public int OwnAddress {
+            get {
                 return linkLayer.OwnAddress;
             }
-            set
-            {
+            set {
                 linkLayer.OwnAddress = value;
             }
         }
@@ -291,15 +285,12 @@ namespace lib60870.CS101
         /// Gets or sets the link layer slave address
         /// </summary>
         /// <value>Slave link layer address.</value>
-        public int SlaveAddress
-        {
-            set
-            {
+        public int SlaveAddress {
+            set {
                 UseSlaveAddress(value);
             }
 
-            get
-            {
+            get {
                 if (primaryLinkLayer == null)
                     return this.slaveAddress;
                 else
@@ -377,7 +368,7 @@ namespace lib60870.CS101
             try
             {
                 if (linkLayerUnbalanced != null)
-                     linkLayerUnbalanced.RequestClass1Data(address);
+                    linkLayerUnbalanced.RequestClass1Data(address);
             }
             catch (LinkLayerBusyException)
             {
@@ -583,13 +574,27 @@ namespace lib60870.CS101
 
             fileClient.RequestFile(ca, ioa, nof, receiver);
         }
-
-        public override void SendFile (int ca, int ioa, NameOfFile nof, IFileProvider fileProvider)
+        public override void GetFile(int ca, int ioa, string nof, IFileReceiver receiver)
         {
             if (fileClient == null)
-                fileClient = new FileClient (this, DebugLog);
+                fileClient = new FileClient(this, DebugLog);
 
-            fileClient.SendFile (ca, ioa, nof, fileProvider);
+            fileClient.RequestFile(ca, ioa, nof, receiver);
+        }
+
+        public override void SendFile(int ca, int ioa, NameOfFile nof, IFileProvider fileProvider)
+        {
+            if (fileClient == null)
+                fileClient = new FileClient(this, DebugLog);
+
+            fileClient.SendFile(ca, ioa, nof, fileProvider);
+        }
+        public override void SendFile(int ca, int ioa, string nof, int fileId, IFileProvider fileProvider)
+        {
+            if (fileClient == null)
+                fileClient = new FileClient(this, DebugLog);
+
+            fileClient.SendFile(ca, ioa, nof, fileId, fileProvider);
         }
     }
 

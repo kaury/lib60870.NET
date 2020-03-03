@@ -60,7 +60,7 @@ namespace lib60870.CS104
         /// Conformation of STOP DT command received (server will no longer send or accept application layer messages)
         /// </summary>
         STOPDT_CON_RECEIVED = 3,
-        
+
         /// <summary>
         /// The connect attempt has failed
         /// </summary>
@@ -90,14 +90,11 @@ namespace lib60870.CS104
         /// Gets or sets the sent message counter.
         /// </summary>
         /// <value>The sent message counter.</value>
-        public int SentMsgCounter
-        {
-            get
-            {
+        public int SentMsgCounter {
+            get {
                 return this.sentMsgCounter;
             }
-            internal set
-            {
+            internal set {
                 this.sentMsgCounter = value;
             }
         }
@@ -106,14 +103,11 @@ namespace lib60870.CS104
         /// Gets or sets the received message counter.
         /// </summary>
         /// <value>The received message counter.</value>
-        public int RcvdMsgCounter
-        {
-            get
-            {
+        public int RcvdMsgCounter {
+            get {
                 return this.rcvdMsgCounter;
             }
-            internal set
-            {
+            internal set {
                 this.rcvdMsgCounter = value;
             }
         }
@@ -122,14 +116,11 @@ namespace lib60870.CS104
         /// Counter for the TEST_FR_ACT messages received.
         /// </summary>
         /// <value>The TEST_FR_ACT counter.</value>
-        public int RcvdTestFrActCounter
-        {
-            get
-            {
+        public int RcvdTestFrActCounter {
+            get {
                 return this.rcvdTestFrActCounter;
             }
-            internal set
-            {
+            internal set {
                 this.rcvdTestFrActCounter = value;
             }
         }
@@ -138,14 +129,11 @@ namespace lib60870.CS104
         /// Counter for the TEST_FR_CON messages received.
         /// </summary>
         /// <value>The TEST_FR_CON counter.</value>
-        public int RcvdTestFrConCounter
-        {
-            get
-            {
+        public int RcvdTestFrConCounter {
+            get {
                 return this.rcvdTestFrConCounter;
             }
-            internal set
-            {
+            internal set {
                 this.rcvdTestFrConCounter = value;
             }
         }
@@ -154,12 +142,12 @@ namespace lib60870.CS104
     /// <summary>
     /// ASDU received handler.
     /// </summary>
-    public delegate bool ASDUReceivedHandler(object parameter,ASDU asdu);
+    public delegate bool ASDUReceivedHandler(object parameter, ASDU asdu);
 
     /// <summary>
     /// Callback handler for connection events
     /// </summary>
-    public delegate void ConnectionHandler(object parameter,ConnectionEvent connectionEvent);
+    public delegate void ConnectionHandler(object parameter, ConnectionEvent connectionEvent);
 
     /// <summary>
     /// A single connection to a CS 104 (IEC 60870-5-104) server. Implements the \ref Master interface.
@@ -253,14 +241,11 @@ namespace lib60870.CS104
         /// ignored and a <see cref="lib60870.ConnectionException"/> will be thrown in this case.
         /// </description>
         /// <value><c>true</c> if use send message queue; otherwise, <c>false</c>.</value>
-        public bool UseSendMessageQueue
-        {
-            get
-            {
+        public bool UseSendMessageQueue {
+            get {
                 return this.useSendMessageQueue;
             }
-            set
-            {
+            set {
                 useSendMessageQueue = value;
             }
         }
@@ -270,26 +255,20 @@ namespace lib60870.CS104
         /// in real application!
         /// </summary>
         /// <value>The send sequence number N(S)</value>
-        public int SendSequenceNumber
-        {
-            get
-            {
+        public int SendSequenceNumber {
+            get {
                 return this.sendSequenceNumber;
             }
-            set
-            {
+            set {
                 this.sendSequenceNumber = value;
             }
         }
 
-        protected bool CheckSequenceNumbers
-        {
-            get
-            {
+        protected bool CheckSequenceNumbers {
+            get {
                 return checkSequenceNumbers;
             }
-            set
-            {
+            set {
                 checkSequenceNumbers = value;
             }
         }
@@ -299,14 +278,11 @@ namespace lib60870.CS104
         /// in real application!
         /// </summary>
         /// <value>The receive sequence number N(R)</value>
-        public int ReceiveSequenceNumber
-        {
-            get
-            {
+        public int ReceiveSequenceNumber {
+            get {
                 return this.receiveSequenceNumber;
             }
-            set
-            {
+            set {
                 this.receiveSequenceNumber = value;
             }
         }
@@ -316,14 +292,11 @@ namespace lib60870.CS104
         /// a STARTDT_ACT message on startup.
         /// </summary>
         /// <value><c>true</c> to send STARTDT_ACT message on startup; otherwise, <c>false</c>.</value>
-        public bool Autostart
-        {
-            get
-            {
+        public bool Autostart {
+            get {
                 return this.autostart;
             }
-            set
-            {
+            set {
                 this.autostart = value;
             }
         }
@@ -365,10 +338,8 @@ namespace lib60870.CS104
         private int connectTimeoutInMs = 1000;
         private int receiveTimeoutInMs = 1000; /* maximum allowed time between SOF byte and last message byte */
 
-        public ApplicationLayerParameters Parameters
-        {
-            get
-            {
+        public ApplicationLayerParameters Parameters {
+            get {
                 return this.alParameters;
             }
         }
@@ -795,14 +766,11 @@ namespace lib60870.CS104
         /// <summary>
         /// Timeout for connection establishment in milliseconds (ms)
         /// </summary>
-        public int ConnectTimeout
-        {
-            get
-            {
+        public int ConnectTimeout {
+            get {
                 return this.connectTimeoutInMs;
             }
-            set
-            {
+            set {
                 this.connectTimeoutInMs = value;
             }
         }
@@ -810,14 +778,11 @@ namespace lib60870.CS104
         /// <summary>
         /// Maximum allowed time for receiving a single message
         /// </summary>
-        public int ReceiveTimeout
-        {
-            get
-            {
+        public int ReceiveTimeout {
+            get {
                 return this.receiveTimeoutInMs;
             }
-            set
-            {
+            set {
                 this.receiveTimeoutInMs = value;
             }
         }
@@ -1044,7 +1009,7 @@ namespace lib60870.CS104
                 {
                     throw new ConnectionException("Failed to write to socket", ex);
                 }
-           
+
                 statistics.SentMsgCounter++;
                 if (sentMessageHandler != null)
                 {
@@ -1073,7 +1038,7 @@ namespace lib60870.CS104
                 {
                     throw new ConnectionException("Failed to write to socket", ex);
                 }
-                
+
                 statistics.SentMsgCounter++;
                 if (sentMessageHandler != null)
                 {
@@ -1129,7 +1094,7 @@ namespace lib60870.CS104
                 {
                     throw new ConnectionException("Failed to write to socket", ex);
                 }
-                
+
                 statistics.SentMsgCounter++;
                 if (sentMessageHandler != null)
                 {
@@ -1157,7 +1122,7 @@ namespace lib60870.CS104
                 {
                     throw new ConnectionException("Failed to write to socket", ex);
                 }
-                
+
                 statistics.SentMsgCounter++;
                 if (sentMessageHandler != null)
                 {
@@ -1604,7 +1569,7 @@ namespace lib60870.CS104
                 return false;
         }
 
-        private bool CertificateValidationCallback (Object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
+        private bool CertificateValidationCallback(Object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
         {
             if (certificate != null)
             {
@@ -1824,7 +1789,7 @@ namespace lib60870.CS104
                                     loopRunning = false;
 
                                 if (fileClient != null)
-                                    fileClient.HandleFileService ();
+                                    fileClient.HandleFileService();
 
                                 if (isConnected() == false)
                                     loopRunning = false;
@@ -1908,10 +1873,8 @@ namespace lib60870.CS104
         /// Gets a value indicating whether this <see cref="T:lib60870.CS104.Connection"/> is running(connected).
         /// </summary>
         /// <value><c>true</c> if is running/connected; otherwise, <c>false</c>.</value>
-        public bool IsRunning
-        {
-            get
-            {
+        public bool IsRunning {
+            get {
                 return this.running;
             }
         }
@@ -1996,13 +1959,29 @@ namespace lib60870.CS104
             fileClient.RequestFile(ca, ioa, nof, receiver);
         }
 
-
-        public override void SendFile (int ca, int ioa, NameOfFile nof, IFileProvider fileProvider)
+        public override void GetFile(int ca, int ioa, string nof, IFileReceiver receiver)
         {
             if (fileClient == null)
-                fileClient = new FileClient (this, DebugLog);
+                fileClient = new FileClient(this, DebugLog);
 
-            fileClient.SendFile (ca, ioa, nof, fileProvider);
+            fileClient.RequestFile(ca, ioa, nof, receiver);
+        }
+
+
+        public override void SendFile(int ca, int ioa, NameOfFile nof, IFileProvider fileProvider)
+        {
+            if (fileClient == null)
+                fileClient = new FileClient(this, DebugLog);
+
+            fileClient.SendFile(ca, ioa, nof, fileProvider);
+        }
+
+        public override void SendFile(int ca, int ioa, string nof, int fileId, IFileProvider fileProvider)
+        {
+            if (fileClient == null)
+                fileClient = new FileClient(this, DebugLog);
+
+            fileClient.SendFile(ca, ioa, nof, fileId, fileProvider);
         }
 
         public void GetDirectory(int ca)

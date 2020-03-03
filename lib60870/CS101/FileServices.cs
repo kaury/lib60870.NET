@@ -45,6 +45,7 @@ namespace lib60870.CS101
         void Finished(FileErrorCode result);
 
         void SegmentReceived(byte sectionName, int offset, int size, byte[] data);
+        void SegmentReceived(int fileId, int offset, uint size, byte[] data);
     }
 
     public interface IFileProvider
@@ -103,7 +104,7 @@ namespace lib60870.CS101
     /// <summary>
     /// File ready handler. Will be called by the FileServer when a master sends a FILE READY (file download announcement) message to the slave.
     /// </summary>
-	public delegate IFileReceiver FileReadyHandler(object parameter,int ca,int ioa,NameOfFile nof,int lengthOfFile);
+	public delegate IFileReceiver FileReadyHandler(object parameter, int ca, int ioa, NameOfFile nof, int lengthOfFile);
 
     /// <summary>
     /// Simple implementation of IFileProvider that can be used to provide transparent files. Derived classed should override the
@@ -197,7 +198,7 @@ namespace lib60870.CS101
         IDLE,
 
         /* states for file upload (monitor direction) */
-            
+
         WAITING_FOR_FILE_READY,
 
         WAITING_FOR_SECTION_READY, /* or for LAST_SECTION */
@@ -214,7 +215,9 @@ namespace lib60870.CS101
 
         WAITING_FOR_SECTION_ACK,
 
-        WAITING_FOR_FILE_ACK
+        WAITING_FOR_FILE_ACK,
+
+        SEND_SECTION_210
 
     }
 
@@ -244,11 +247,16 @@ namespace lib60870.CS101
         private long timeout = 3000;
         private long lastSentTime = 0;
 
+        private int fileId;
+        private string fileName;
+        private uint fileSize;
+        private int offset;
+
         public FileClient(Master master, DebugLogger debugLog)
         {
             this.master = master;
             DebugLog = debugLog;
-            maxSegmentSize = FileSegment.GetMaxDataSize (master.GetApplicationLayerParameters());
+            maxSegmentSize = FileSegment.GetMaxDataSize(master.GetApplicationLayerParameters());
         }
 
         /// <summary>
@@ -272,64 +280,111 @@ namespace lib60870.CS101
 
             return asdu;
         }
-
-        private void SendLastSegment ()
+        private ASDU NewAsdu(InformationObject io, CauseOfTransmission cot)
         {
-            ASDU fileAsdu = NewAsdu(new FileLastSegmentOrSection (ioa, nof, (byte)numberOfSection,
+            ASDU asdu = new ASDU(master.GetApplicationLayerParameters(), cot, false, false, 0, ca, false);
+
+            asdu.AddInformationObject(io);
+
+            return asdu;
+        }
+
+        private void SendLastSegment()
+        {
+            ASDU fileAsdu = NewAsdu(new FileLastSegmentOrSection(ioa, nof, (byte)numberOfSection,
                     LastSectionOrSegmentQualifier.SECTION_TRANSFER_WITHOUT_DEACT,
                     sectionChecksum));
 
             fileChecksum += sectionChecksum;
             sectionChecksum = 0;
 
-            DebugLog ("Send LAST SEGMENT (NoS=" + numberOfSection + ")");
+            DebugLog("Send LAST SEGMENT (NoS=" + numberOfSection + ")");
 
-            master.SendASDU (fileAsdu);
+            master.SendASDU(fileAsdu);
         }
 
-        private byte CalculateChecksum (byte [] data)
+        private byte CalculateChecksum(byte[] data)
         {
             byte checksum = 0;
 
-            foreach (byte octet in data) {
+            foreach (byte octet in data)
+            {
                 checksum += octet;
             }
 
             return checksum;
         }
 
-        private bool SendSegment ()
+        private bool SendSegment()
         {
             int currentSegmentSize = currentSectionSize - currentSectionOffset;
 
-            if (currentSegmentSize > 0) {
+            if (currentSegmentSize > 0)
+            {
                 if (currentSegmentSize > maxSegmentSize)
                     currentSegmentSize = maxSegmentSize;
 
-                byte [] segmentData = new byte [currentSegmentSize];
+                byte[] segmentData = new byte[currentSegmentSize];
 
-                fileProvider.GetSegmentData (numberOfSection - 1,
+                fileProvider.GetSegmentData(numberOfSection - 1,
                     currentSectionOffset,
                     currentSegmentSize,
                     segmentData);
 
-                ASDU fileAsdu = NewAsdu (new FileSegment (ioa, nof, (byte)numberOfSection, segmentData));
+                ASDU fileAsdu = NewAsdu(new FileSegment(ioa, nof, (byte)numberOfSection, segmentData));
 
-                lastSentTime = SystemUtils.currentTimeMillis ();
+                lastSentTime = SystemUtils.currentTimeMillis();
 
-                master.SendASDU (fileAsdu);
+                master.SendASDU(fileAsdu);
 
-                sectionChecksum += CalculateChecksum (segmentData); 
+                sectionChecksum += CalculateChecksum(segmentData);
 
-                DebugLog ("Send SEGMENT (NoS=" + numberOfSection + ", CHS=" + sectionChecksum + ")");
+                DebugLog("Send SEGMENT (NoS=" + numberOfSection + ", CHS=" + sectionChecksum + ")");
                 currentSectionOffset += currentSegmentSize;
 
                 return true;
-            } else
+            }
+            else
                 return false;
 
         }
 
+        private bool SendSegment210()
+        {
+            int currentSegmentSize = currentSectionSize - currentSectionOffset;
+
+            if (currentSegmentSize > 0)
+            {
+                bool followupTmp = true;
+                if (currentSegmentSize > maxSegmentSize)
+                    currentSegmentSize = maxSegmentSize;
+                else
+                    followupTmp = false;
+
+                byte[] segmentData = new byte[currentSegmentSize];
+
+                fileProvider.GetSegmentData(numberOfSection - 1,
+                    currentSectionOffset,
+                    currentSegmentSize,
+                    segmentData);
+
+                sectionChecksum += CalculateChecksum(segmentData);
+
+                ASDU fileAsdu = NewAsdu(new FIleWriteTransfer(0, fileId, numberOfSection, followupTmp, segmentData, sectionChecksum));
+
+                lastSentTime = SystemUtils.currentTimeMillis();
+
+                master.SendASDU(fileAsdu);
+
+                DebugLog("Write file (NoS=" + numberOfSection + ", CHS=" + sectionChecksum + ")");
+                currentSectionOffset += currentSegmentSize;
+
+                return true;
+            }
+            else
+                return false;
+
+        }
         private void ResetStateToIdle()
         {
             fileReceiver = null;
@@ -344,7 +399,7 @@ namespace lib60870.CS101
 
             master.SendASDU(deactivateFile);
 
-            lastSentTime = SystemUtils.currentTimeMillis ();
+            lastSentTime = SystemUtils.currentTimeMillis();
 
             if (fileReceiver != null)
                 fileReceiver.Finished(errorCode);
@@ -352,11 +407,11 @@ namespace lib60870.CS101
             ResetStateToIdle();
         }
 
-        private void FileUploadFailed ()
+        private void FileUploadFailed()
         {
             if (fileProvider != null)
-                fileProvider.TransferComplete (false);
-            ResetStateToIdle ();
+                fileProvider.TransferComplete(false);
+            ResetStateToIdle();
         }
 
         public bool HandleFileAsdu(ASDU asdu)
@@ -366,318 +421,539 @@ namespace lib60870.CS101
             switch (asdu.TypeId)
             {
 
-            case TypeID.F_SC_NA_1: /* File/Section/Directory Call/Select */
+                case TypeID.F_SC_NA_1: /* File/Section/Directory Call/Select */
 
-                DebugLog ("Received F_SC_NA_1 (select/call)");
+                    DebugLog("Received F_SC_NA_1 (select/call)");
 
-                if (state == FileClientState.WAITING_FOR_FILE_READY) /* file download */
-                {
-                    FileErrorCode errCode = FileErrorCode.PROTOCOL_ERROR;
+                    if (state == FileClientState.WAITING_FOR_FILE_READY) /* file download */
+                    {
+                        FileErrorCode errCode = FileErrorCode.PROTOCOL_ERROR;
 
-                    if (asdu.Cot == CauseOfTransmission.UNKNOWN_TYPE_ID)
-                        errCode = FileErrorCode.UNKNOWN_SERVICE;
-                    else if (asdu.Cot == CauseOfTransmission.UNKNOWN_COMMON_ADDRESS_OF_ASDU)
-                        errCode = FileErrorCode.UNKNOWN_CA;
-                    else if (asdu.Cot == CauseOfTransmission.UNKNOWN_INFORMATION_OBJECT_ADDRESS)
-                        errCode = FileErrorCode.UNKNOWN_IOA;
-
-                    if (fileReceiver != null)
-                        fileReceiver.Finished (errCode);
-
-                    ResetStateToIdle ();
-                } else if (state == FileClientState.WAITING_FOR_REQUEST_FILE) /* file upload */
-                  {
-                    if ((asdu.Ca == ca)) {
-
-                        numberOfSection = 1;
-                        currentSectionSize = fileProvider.GetSectionSize (0);
-
-                        ASDU sectionReady = NewAsdu (new SectionReady (ioa, nof, 1, currentSectionSize, false));
-                        master.SendASDU (sectionReady);
-
-                        lastSentTime = SystemUtils.currentTimeMillis ();
-
-                        state = FileClientState.SECTION_READY;
-                    } else {
-                        fileProvider.TransferComplete (false);
-                        ResetStateToIdle ();
-                    }
-                } else if (state == FileClientState.SECTION_READY) {
-
-                    if ((asdu.Ca == ca)) {
-
-                        // send first segment
-
-                        currentSectionOffset = 0;
-
-                        SendSegment ();
-
-                        state = FileClientState.SEND_SECTION;
-                    }
-
-                } else {
-                    if (fileReceiver != null)
-                        fileReceiver.Finished (FileErrorCode.PROTOCOL_ERROR);
-
-                    ResetStateToIdle ();
-                }
-
-                break;
-
-            case TypeID.F_FR_NA_1: /* File ready */
-
-                DebugLog("Received F_FR_NA_1 (file ready)");
-
-                if (state == FileClientState.WAITING_FOR_FILE_READY) {
-
-                    FileReady fileReady = (FileReady)asdu.GetElement (0);
-
-                    if ((asdu.Ca == ca) && (fileReady.ObjectAddress == ioa) && (fileReady.NOF == nof)) {
-
-                        if (fileReady.Positive) {
-
-                            /* send call file */
-
-                            ASDU callFile = NewAsdu (new FileCallOrSelect (ioa, nof, 0, SelectAndCallQualifier.REQUEST_FILE));
-                            master.SendASDU (callFile);
-
-                            lastSentTime = SystemUtils.currentTimeMillis ();
-
-                            DebugLog ("Send CALL FILE");
-
-                            state = FileClientState.WAITING_FOR_SECTION_READY;
-
-                        } else {
-                            if (fileReceiver != null)
-                                fileReceiver.Finished (FileErrorCode.FILE_NOT_READY);
-
-                            ResetStateToIdle ();
-                        }
-
-                    } else {
-                        DebugLog ("Unexpected CA, IOA, or NOF");
+                        if (asdu.Cot == CauseOfTransmission.UNKNOWN_TYPE_ID)
+                            errCode = FileErrorCode.UNKNOWN_SERVICE;
+                        else if (asdu.Cot == CauseOfTransmission.UNKNOWN_COMMON_ADDRESS_OF_ASDU)
+                            errCode = FileErrorCode.UNKNOWN_CA;
+                        else if (asdu.Cot == CauseOfTransmission.UNKNOWN_INFORMATION_OBJECT_ADDRESS)
+                            errCode = FileErrorCode.UNKNOWN_IOA;
 
                         if (fileReceiver != null)
-                            fileReceiver.Finished (FileErrorCode.PROTOCOL_ERROR);
+                            fileReceiver.Finished(errCode);
 
-                        ResetStateToIdle ();
+                        ResetStateToIdle();
+                    }
+                    else if (state == FileClientState.WAITING_FOR_REQUEST_FILE) /* file upload */
+                    {
+                        if ((asdu.Ca == ca))
+                        {
+
+                            numberOfSection = 1;
+                            currentSectionSize = fileProvider.GetSectionSize(0);
+
+                            ASDU sectionReady = NewAsdu(new SectionReady(ioa, nof, 1, currentSectionSize, false));
+                            master.SendASDU(sectionReady);
+
+                            lastSentTime = SystemUtils.currentTimeMillis();
+
+                            state = FileClientState.SECTION_READY;
+                        }
+                        else
+                        {
+                            fileProvider.TransferComplete(false);
+                            ResetStateToIdle();
+                        }
+                    }
+                    else if (state == FileClientState.SECTION_READY)
+                    {
+
+                        if ((asdu.Ca == ca))
+                        {
+
+                            // send first segment
+
+                            currentSectionOffset = 0;
+
+                            SendSegment();
+
+                            state = FileClientState.SEND_SECTION;
+                        }
+
+                    }
+                    else
+                    {
+                        if (fileReceiver != null)
+                            fileReceiver.Finished(FileErrorCode.PROTOCOL_ERROR);
+
+                        ResetStateToIdle();
                     }
 
+                    break;
 
-                } else if (state == FileClientState.IDLE) {
-                
-                    state = FileClientState.WAITING_FOR_SECTION_READY;
+                case TypeID.F_FR_NA_1: /* File ready */
 
-                } else if (state == FileClientState.WAITING_FOR_REQUEST_FILE) {
+                    DebugLog("Received F_FR_NA_1 (file ready)");
 
-                    if (asdu.IsNegative) {
-                        DebugLog ("Slave rejected file download: " + asdu.Cot.ToString ());
-                    } else {
-                        DebugLog ("Unexpected file ready while trying to start file download");
-                    }
+                    if (state == FileClientState.WAITING_FOR_FILE_READY)
+                    {
 
-                    if (fileProvider != null)
-                        fileProvider.TransferComplete (false);
+                        FileReady fileReady = (FileReady)asdu.GetElement(0);
 
-                } else {
-                    AbortFileTransfer (FileErrorCode.PROTOCOL_ERROR);
-                }
+                        if ((asdu.Ca == ca) && (fileReady.ObjectAddress == ioa) && (fileReady.NOF == nof))
+                        {
 
-                break;
+                            if (fileReady.Positive)
+                            {
 
-            case TypeID.F_SR_NA_1: /* Section ready */
+                                /* send call file */
 
-                DebugLog ("Received F_SR_NA_1 (section ready)");
+                                ASDU callFile = NewAsdu(new FileCallOrSelect(ioa, nof, 0, SelectAndCallQualifier.REQUEST_FILE));
+                                master.SendASDU(callFile);
 
-                if (state == FileClientState.WAITING_FOR_SECTION_READY) {
+                                lastSentTime = SystemUtils.currentTimeMillis();
 
-                    SectionReady sc = (SectionReady)asdu.GetElement (0);
+                                DebugLog("Send CALL FILE");
 
-                    if (sc.NotReady == false) {
-                        DebugLog ("Received SECTION READY(NoF=" + sc.NOF + ", NoS=" + sc.NameOfSection + ")");
+                                state = FileClientState.WAITING_FOR_SECTION_READY;
 
-                        ASDU callSection = NewAsdu (new FileCallOrSelect (ioa, nof, sc.NameOfSection, SelectAndCallQualifier.REQUEST_SECTION));
-                        master.SendASDU (callSection);
-
-                        lastSentTime = SystemUtils.currentTimeMillis ();
-
-                        DebugLog ("Send CALL SECTION(NoF=" + sc.NOF + ", NoS=" + sc.NameOfSection + ")");
-
-                        currentSectionOffset = 0;
-                        sectionChecksum = 0;
-                        state = FileClientState.RECEIVING_SECTION;
-
-                    } else {
-                        AbortFileTransfer (FileErrorCode.SECTION_NOT_READY);
-                    }
-
-                } else if (state == FileClientState.IDLE) {
-                } else {
-                    if (fileReceiver != null)
-                        fileReceiver.Finished (FileErrorCode.PROTOCOL_ERROR);
-
-                    ResetStateToIdle ();
-                }
-
-                break;
-
-            case TypeID.F_SG_NA_1: /* Segment */
-
-                DebugLog ("Received F_SG_NA_1 (segment)");
-
-                if (state == FileClientState.RECEIVING_SECTION) {
-
-                    FileSegment segment = (FileSegment)asdu.GetElement (0);
-
-                    DebugLog ("Received segment (NoS=" + segment.NameOfSection + ", LoS=" + segment.LengthOfSegment + ")");
-
-                    sectionChecksum += CalculateChecksum (segment.SegmentData);
-
-                    if (fileReceiver != null) {
-                        fileReceiver.SegmentReceived (segment.NameOfSection, currentSectionOffset, segment.LengthOfSegment, segment.SegmentData);
-                    }
-
-                    currentSectionOffset += segment.LengthOfSegment;
-
-                } else if (state == FileClientState.IDLE) {
-                } else {
-                    AbortFileTransfer (FileErrorCode.PROTOCOL_ERROR);
-                }
-
-                break;
-
-
-            case TypeID.F_LS_NA_1: /* Last segment or section */
-
-                DebugLog ("Received F_LS_NA_1 (last segment/section)");
-
-                if (state != FileClientState.IDLE) {
-
-                    FileLastSegmentOrSection lastSection = (FileLastSegmentOrSection)asdu.GetElement (0);
-
-                    if (lastSection.LSQ == LastSectionOrSegmentQualifier.SECTION_TRANSFER_WITHOUT_DEACT) {
-
-                        if (state == FileClientState.RECEIVING_SECTION) {
-
-                            ASDU segmentAck;
-
-                            if (lastSection.CHS == sectionChecksum) {
-                                segmentAck = NewAsdu (new FileACK (ioa, nof, lastSection.NameOfSection, AcknowledgeQualifier.POS_ACK_SECTION, FileError.DEFAULT));
-                                DebugLog ("Send SEGMENT ACK");
                             }
                             else
                             {
-                                segmentAck = NewAsdu (new FileACK (ioa, nof, lastSection.NameOfSection, AcknowledgeQualifier.NEG_ACK_SECTION, FileError.CHECKSUM_FAILED));
-                                DebugLog ("checksum check failed! Send SEGMENT NACK");
+                                if (fileReceiver != null)
+                                    fileReceiver.Finished(FileErrorCode.FILE_NOT_READY);
+
+                                ResetStateToIdle();
                             }
 
-                            master.SendASDU (segmentAck);
-
-                            lastSentTime = SystemUtils.currentTimeMillis ();
-
-                            state = FileClientState.WAITING_FOR_SECTION_READY;
-                        } else {
-                            AbortFileTransfer (FileErrorCode.PROTOCOL_ERROR);
                         }
-                    } else if (lastSection.LSQ == LastSectionOrSegmentQualifier.FILE_TRANSFER_WITH_DEACT) {
-                        /* slave aborted transfer */
-
-                        if (fileReceiver != null)
-                            fileReceiver.Finished (FileErrorCode.ABORTED_BY_REMOTE);
-
-                        ResetStateToIdle ();
-                    } else if (lastSection.LSQ == LastSectionOrSegmentQualifier.FILE_TRANSFER_WITHOUT_DEACT) {
-
-                        if (state == FileClientState.WAITING_FOR_SECTION_READY) {
-                            ASDU fileAck = NewAsdu (new FileACK (ioa, nof, lastSection.NameOfSection, AcknowledgeQualifier.POS_ACK_FILE, FileError.DEFAULT));
-
-                            master.SendASDU (fileAck);
-
-                            lastSentTime = SystemUtils.currentTimeMillis ();
-
-                            DebugLog ("Send FILE ACK");
+                        else
+                        {
+                            DebugLog("Unexpected CA, IOA, or NOF");
 
                             if (fileReceiver != null)
-                                fileReceiver.Finished (FileErrorCode.SUCCESS);
+                                fileReceiver.Finished(FileErrorCode.PROTOCOL_ERROR);
 
-                            ResetStateToIdle ();
-                        } else {
+                            ResetStateToIdle();
+                        }
 
-                            DebugLog ("Illegal state: " + state.ToString ());
 
-                            AbortFileTransfer (FileErrorCode.PROTOCOL_ERROR);
+                    }
+                    else if (state == FileClientState.IDLE)
+                    {
+
+                        state = FileClientState.WAITING_FOR_SECTION_READY;
+
+                    }
+                    else if (state == FileClientState.WAITING_FOR_REQUEST_FILE)
+                    {
+
+                        if (asdu.IsNegative)
+                        {
+                            DebugLog("Slave rejected file download: " + asdu.Cot.ToString());
+                        }
+                        else
+                        {
+                            DebugLog("Unexpected file ready while trying to start file download");
+                        }
+
+                        if (fileProvider != null)
+                            fileProvider.TransferComplete(false);
+
+                    }
+                    else
+                    {
+                        AbortFileTransfer(FileErrorCode.PROTOCOL_ERROR);
+                    }
+
+                    break;
+
+                case TypeID.F_SR_NA_1: /* Section ready */
+
+                    DebugLog("Received F_SR_NA_1 (section ready)");
+
+                    if (state == FileClientState.WAITING_FOR_SECTION_READY)
+                    {
+
+                        SectionReady sc = (SectionReady)asdu.GetElement(0);
+
+                        if (sc.NotReady == false)
+                        {
+                            DebugLog("Received SECTION READY(NoF=" + sc.NOF + ", NoS=" + sc.NameOfSection + ")");
+
+                            ASDU callSection = NewAsdu(new FileCallOrSelect(ioa, nof, sc.NameOfSection, SelectAndCallQualifier.REQUEST_SECTION));
+                            master.SendASDU(callSection);
+
+                            lastSentTime = SystemUtils.currentTimeMillis();
+
+                            DebugLog("Send CALL SECTION(NoF=" + sc.NOF + ", NoS=" + sc.NameOfSection + ")");
+
+                            currentSectionOffset = 0;
+                            sectionChecksum = 0;
+                            state = FileClientState.RECEIVING_SECTION;
+
+                        }
+                        else
+                        {
+                            AbortFileTransfer(FileErrorCode.SECTION_NOT_READY);
+                        }
+
+                    }
+                    else if (state == FileClientState.IDLE)
+                    {
+                    }
+                    else
+                    {
+                        if (fileReceiver != null)
+                            fileReceiver.Finished(FileErrorCode.PROTOCOL_ERROR);
+
+                        ResetStateToIdle();
+                    }
+
+                    break;
+
+                case TypeID.F_SG_NA_1: /* Segment */
+
+                    DebugLog("Received F_SG_NA_1 (segment)");
+
+                    if (state == FileClientState.RECEIVING_SECTION)
+                    {
+
+                        FileSegment segment = (FileSegment)asdu.GetElement(0);
+
+                        DebugLog("Received segment (NoS=" + segment.NameOfSection + ", LoS=" + segment.LengthOfSegment + ")");
+
+                        sectionChecksum += CalculateChecksum(segment.SegmentData);
+
+                        if (fileReceiver != null)
+                        {
+                            fileReceiver.SegmentReceived(segment.NameOfSection, currentSectionOffset, segment.LengthOfSegment, segment.SegmentData);
+                        }
+
+                        currentSectionOffset += segment.LengthOfSegment;
+
+                    }
+                    else if (state == FileClientState.IDLE)
+                    {
+                    }
+                    else
+                    {
+                        AbortFileTransfer(FileErrorCode.PROTOCOL_ERROR);
+                    }
+
+                    break;
+
+
+                case TypeID.F_LS_NA_1: /* Last segment or section */
+
+                    DebugLog("Received F_LS_NA_1 (last segment/section)");
+
+                    if (state != FileClientState.IDLE)
+                    {
+
+                        FileLastSegmentOrSection lastSection = (FileLastSegmentOrSection)asdu.GetElement(0);
+
+                        if (lastSection.LSQ == LastSectionOrSegmentQualifier.SECTION_TRANSFER_WITHOUT_DEACT)
+                        {
+
+                            if (state == FileClientState.RECEIVING_SECTION)
+                            {
+
+                                ASDU segmentAck;
+
+                                if (lastSection.CHS == sectionChecksum)
+                                {
+                                    segmentAck = NewAsdu(new FileACK(ioa, nof, lastSection.NameOfSection, AcknowledgeQualifier.POS_ACK_SECTION, FileError.DEFAULT));
+                                    DebugLog("Send SEGMENT ACK");
+                                }
+                                else
+                                {
+                                    segmentAck = NewAsdu(new FileACK(ioa, nof, lastSection.NameOfSection, AcknowledgeQualifier.NEG_ACK_SECTION, FileError.CHECKSUM_FAILED));
+                                    DebugLog("checksum check failed! Send SEGMENT NACK");
+                                }
+
+                                master.SendASDU(segmentAck);
+
+                                lastSentTime = SystemUtils.currentTimeMillis();
+
+                                state = FileClientState.WAITING_FOR_SECTION_READY;
+                            }
+                            else
+                            {
+                                AbortFileTransfer(FileErrorCode.PROTOCOL_ERROR);
+                            }
+                        }
+                        else if (lastSection.LSQ == LastSectionOrSegmentQualifier.FILE_TRANSFER_WITH_DEACT)
+                        {
+                            /* slave aborted transfer */
+
+                            if (fileReceiver != null)
+                                fileReceiver.Finished(FileErrorCode.ABORTED_BY_REMOTE);
+
+                            ResetStateToIdle();
+                        }
+                        else if (lastSection.LSQ == LastSectionOrSegmentQualifier.FILE_TRANSFER_WITHOUT_DEACT)
+                        {
+
+                            if (state == FileClientState.WAITING_FOR_SECTION_READY)
+                            {
+                                ASDU fileAck = NewAsdu(new FileACK(ioa, nof, lastSection.NameOfSection, AcknowledgeQualifier.POS_ACK_FILE, FileError.DEFAULT));
+
+                                master.SendASDU(fileAck);
+
+                                lastSentTime = SystemUtils.currentTimeMillis();
+
+                                DebugLog("Send FILE ACK");
+
+                                if (fileReceiver != null)
+                                    fileReceiver.Finished(FileErrorCode.SUCCESS);
+
+                                ResetStateToIdle();
+                            }
+                            else
+                            {
+
+                                DebugLog("Illegal state: " + state.ToString());
+
+                                AbortFileTransfer(FileErrorCode.PROTOCOL_ERROR);
+                            }
                         }
                     }
-                }
 
-                break;
+                    break;
 
-            case TypeID.F_AF_NA_1: /* Section or File ACK */
+                case TypeID.F_AF_NA_1: /* Section or File ACK */
 
-                DebugLog ("Received F_AF_NA_1 (section/file ACK)");
+                    DebugLog("Received F_AF_NA_1 (section/file ACK)");
 
-                FileACK ack = (FileACK)asdu.GetElement (0);
+                    FileACK ack = (FileACK)asdu.GetElement(0);
 
-                if (state == FileClientState.WAITING_FOR_SECTION_ACK) {
-                    if ((asdu.Ca == ca) && (asdu.Cot == CauseOfTransmission.FILE_TRANSFER)) {
+                    if (state == FileClientState.WAITING_FOR_SECTION_ACK)
+                    {
+                        if ((asdu.Ca == ca) && (asdu.Cot == CauseOfTransmission.FILE_TRANSFER))
+                        {
 
-                        if (ack.AckQualifier == AcknowledgeQualifier.POS_ACK_SECTION) {
+                            if (ack.AckQualifier == AcknowledgeQualifier.POS_ACK_SECTION)
+                            {
 
-                            numberOfSection++;
+                                numberOfSection++;
 
-                            int nextSectionSize = fileProvider.GetSectionSize (numberOfSection - 1);
+                                int nextSectionSize = fileProvider.GetSectionSize(numberOfSection - 1);
 
-                            if (nextSectionSize > 0) {
-                                currentSectionSize = nextSectionSize;
-                                currentSectionOffset = 0;
+                                if (nextSectionSize > 0)
+                                {
+                                    currentSectionSize = nextSectionSize;
+                                    currentSectionOffset = 0;
 
-                                ASDU sectionReady = NewAsdu (new SectionReady (ioa, nof, (byte)numberOfSection, currentSectionSize, false));
-                                master.SendASDU (sectionReady);
+                                    ASDU sectionReady = NewAsdu(new SectionReady(ioa, nof, (byte)numberOfSection, currentSectionSize, false));
+                                    master.SendASDU(sectionReady);
 
-                                lastSentTime = SystemUtils.currentTimeMillis ();
+                                    lastSentTime = SystemUtils.currentTimeMillis();
 
-                                state = FileClientState.SECTION_READY;
-                            } else {
+                                    state = FileClientState.SECTION_READY;
+                                }
+                                else
+                                {
 
-                                ASDU lastSection = NewAsdu (new FileLastSegmentOrSection (ioa, nof, (byte)numberOfSection, LastSectionOrSegmentQualifier.FILE_TRANSFER_WITHOUT_DEACT, fileChecksum));
-                                master.SendASDU (lastSection);
+                                    ASDU lastSection = NewAsdu(new FileLastSegmentOrSection(ioa, nof, (byte)numberOfSection, LastSectionOrSegmentQualifier.FILE_TRANSFER_WITHOUT_DEACT, fileChecksum));
+                                    master.SendASDU(lastSection);
 
-                                lastSentTime = SystemUtils.currentTimeMillis ();
+                                    lastSentTime = SystemUtils.currentTimeMillis();
 
-                                state = FileClientState.WAITING_FOR_FILE_ACK;
+                                    state = FileClientState.WAITING_FOR_FILE_ACK;
+                                }
+
+                            }
+                            else
+                            {
+                                FileUploadFailed();
                             }
 
-                        } else {
-                            FileUploadFailed ();
                         }
-
-                    } else {
-                        FileUploadFailed ();
-                    }
-                } else if (state == FileClientState.WAITING_FOR_FILE_ACK) {
-                    if ((asdu.Ca == ca) && (asdu.Cot == CauseOfTransmission.FILE_TRANSFER)) {
-
-                        if (ack.AckQualifier == AcknowledgeQualifier.POS_ACK_FILE) {
-                            if (fileProvider != null)
-                                fileProvider.TransferComplete (true);
-
-                            ResetStateToIdle ();
-
-                        } else {
-                            FileUploadFailed ();
+                        else
+                        {
+                            FileUploadFailed();
                         }
-
-                    } else {
-                        FileUploadFailed ();
                     }
-                }
+                    else if (state == FileClientState.WAITING_FOR_FILE_ACK)
+                    {
+                        if ((asdu.Ca == ca) && (asdu.Cot == CauseOfTransmission.FILE_TRANSFER))
+                        {
 
-                break;
+                            if (ack.AckQualifier == AcknowledgeQualifier.POS_ACK_FILE)
+                            {
+                                if (fileProvider != null)
+                                    fileProvider.TransferComplete(true);
 
-            default:
+                                ResetStateToIdle();
 
-                asduHandled = false;
-                break;
+                            }
+                            else
+                            {
+                                FileUploadFailed();
+                            }
+
+                        }
+                        else
+                        {
+                            FileUploadFailed();
+                        }
+                    }
+
+                    break;
+
+                case TypeID.F_FR_NA_1_210:
+
+                    DebugLog("Received F_FR_NA_1_210");
+                    FileObjects210 fobj = (FileObjects210)asdu.GetElement(0);
+                    if (asdu.Cot == CauseOfTransmission.REQUEST)
+                    {
+                        if (fobj.OPT == OptionID.CALL_FILES_CON)
+                        {
+                            asduHandled = false;
+                        }
+                        else if (fobj.OPT == OptionID.READ_FILE_TRANSFER)
+                        {
+                            if (state == FileClientState.RECEIVING_SECTION)
+                            {
+                                FIleReadTransfer transfer = (FIleReadTransfer)fobj;
+
+                                offset = transfer.Offset;
+
+                                DebugLog("Received segment (FID=" + transfer.FileId + ", Offset=" + transfer.Offset + ", Followup=" + transfer.Followup + ", Data[]Length=" + transfer.Data.Length + ", CS=" + transfer.CS + ")");
+
+                                sectionChecksum += CalculateChecksum(transfer.Data);
+                                if (transfer.CS == sectionChecksum)
+                                {
+
+                                }
+                                else
+                                {
+                                    DebugLog("checksum check failed! ");
+                                }
+
+                                if (fileReceiver != null)
+                                {
+                                    fileReceiver.SegmentReceived(transfer.FileId, offset, fileSize, transfer.Data);
+                                }
+
+                                currentSectionOffset += transfer.Offset;
+
+                                if (!transfer.Followup)
+                                {
+                                    ASDU lastSection = NewAsdu(new FIleReadTransferCon(0, fileId, offset, false), CauseOfTransmission.REQUEST);
+                                    master.SendASDU(lastSection);
+
+                                    lastSentTime = SystemUtils.currentTimeMillis();
+
+                                    if (fileReceiver != null)
+                                        fileReceiver.Finished(FileErrorCode.SUCCESS);
+
+                                    ResetStateToIdle();
+                                }
+                            }
+                            else
+                            {
+
+                                if (fileReceiver != null)
+                                    fileReceiver.Finished(FileErrorCode.PROTOCOL_ERROR);
+
+                                ResetStateToIdle();
+                            }
+                        }
+                        else if (fobj.OPT == OptionID.WRITE_FILE_TRANSFER_CON)
+                        {
+                            FIleWriteTransferCon con = (FIleWriteTransferCon)fobj;
+
+                            DebugLog("Received write file transfer con (OPT=" + con.OPT + ", Result=" + con.Result + ", FID=" + con.FileId + ")");
+
+                            if (state == FileClientState.WAITING_FOR_SECTION_READY)
+                            {
+                                if (con.Result == WriteFileTransferConResult.SUCCESS)
+                                {
+
+                                    if (fileProvider != null)
+                                        fileProvider.TransferComplete(true);
+
+                                    ResetStateToIdle();
+                                }
+                                else
+                                {
+                                    FileUploadFailed();
+                                }
+                            }
+                            else
+                            {
+                                FileUploadFailed();
+                            }
+                        }
+                    }
+                    else if (asdu.Cot == CauseOfTransmission.ACTIVATION_CON)
+                    {
+                        if (fobj.OPT == OptionID.READ_FILE_ACT_CON)
+                        {
+                            FileReadActCon con = (FileReadActCon)fobj;
+
+                            DebugLog("Received file (OPT=" + con.OPT + ", Result=" + con.Result + ", NOF=" + con.FileName + ", FID=" + con.FileId + ", Size=" + con.FileSize + ")");
+
+                            if (state == FileClientState.WAITING_FOR_FILE_READY)
+                            {
+                                fileId = con.FileId;
+                                fileName = con.FileName;
+                                fileSize = con.FileSize;
+
+                                if (con.Result)
+                                {
+                                    state = FileClientState.RECEIVING_SECTION;
+                                }
+                                else
+                                {
+                                    if (fileReceiver != null)
+                                        fileReceiver.Finished(FileErrorCode.ABORTED_BY_REMOTE);
+
+                                    ResetStateToIdle();
+                                }
+                            }
+                            else
+                            {
+
+                                if (fileReceiver != null)
+                                    fileReceiver.Finished(FileErrorCode.PROTOCOL_ERROR);
+
+                                ResetStateToIdle();
+                            }
+                        }
+                        else if (fobj.OPT == OptionID.WRITE_FILE_ACT_CON)
+                        {
+                            FIleWriteActCon con = (FIleWriteActCon)fobj;
+
+                            DebugLog("Received write file con (OPT=" + con.OPT + ", Result=" + con.Result + ", NOF=" + con.FileName + ", FID=" + con.FileId + ", Size=" + con.FileSize + ")");
+
+                            if (state == FileClientState.WAITING_FOR_REQUEST_FILE)
+                            {
+                                if (con.Result == WriteFileActConResult.SUCCESS)
+                                {
+                                    state = FileClientState.SEND_SECTION_210;
+
+                                    currentSectionOffset = 0;
+
+                                    SendSegment210();
+
+                                }
+                                else
+                                {
+                                    FileUploadFailed();
+                                }
+                            }
+                            else
+                            {
+                                FileUploadFailed();
+                            }
+                        }
+                    }
+                    break;
+
+                default:
+
+                    asduHandled = false;
+                    break;
             }
 
 
@@ -687,28 +963,36 @@ namespace lib60870.CS101
         public void HandleFileService()
         {
 
-            if (state == FileClientState.SEND_SECTION) 
+            if (state == FileClientState.SEND_SECTION)
             {
-                if (SendSegment () == false) {
-                    SendLastSegment ();
+                if (SendSegment() == false)
+                {
+                    SendLastSegment();
+                    state = FileClientState.WAITING_FOR_SECTION_ACK;
+                }
+            }
+            else if (state == FileClientState.SEND_SECTION_210)
+            {
+                if (SendSegment210() == false)
+                {
                     state = FileClientState.WAITING_FOR_SECTION_ACK;
                 }
             }
 
             // Check for timeout
-            if (state != FileClientState.IDLE) 
+            if (state != FileClientState.IDLE)
             {
-                if (SystemUtils.currentTimeMillis () > lastSentTime + timeout)
+                if (SystemUtils.currentTimeMillis() > lastSentTime + timeout)
                 {
-                    DebugLog ("Abort file transfer due to timeout");
+                    DebugLog("Abort file transfer due to timeout");
 
                     if (fileProvider != null)
-                        fileProvider.TransferComplete (false);
+                        fileProvider.TransferComplete(false);
 
                     if (fileReceiver != null)
-                        fileReceiver.Finished (FileErrorCode.TIMEOUT);
+                        fileReceiver.Finished(FileErrorCode.TIMEOUT);
 
-                    ResetStateToIdle ();
+                    ResetStateToIdle();
                 }
             }
 
@@ -725,23 +1009,55 @@ namespace lib60870.CS101
 
             master.SendASDU(selectFile);
 
-            lastSentTime = SystemUtils.currentTimeMillis ();
+            lastSentTime = SystemUtils.currentTimeMillis();
 
             state = FileClientState.WAITING_FOR_FILE_READY;
         }
 
-        public void SendFile (int ca, int ioa, NameOfFile nof, IFileProvider fileProvider)
+        public void SendFile(int ca, int ioa, NameOfFile nof, IFileProvider fileProvider)
         {
             this.ca = ca;
             this.ioa = ioa;
             this.nof = nof;
             this.fileProvider = fileProvider;
 
-            ASDU fileReady = NewAsdu (new FileReady (ioa, nof, fileProvider.GetFileSize (), true));
+            ASDU fileReady = NewAsdu(new FileReady(ioa, nof, fileProvider.GetFileSize(), true));
 
-            master.SendASDU (fileReady);
+            master.SendASDU(fileReady);
 
-            lastSentTime = SystemUtils.currentTimeMillis ();
+            lastSentTime = SystemUtils.currentTimeMillis();
+
+            state = FileClientState.WAITING_FOR_REQUEST_FILE;
+        }
+
+        public void RequestFile(int ca, int ioa, string fileName, IFileReceiver fileReceiver)
+        {
+            this.ca = ca;
+            this.ioa = ioa;
+            this.fileName = fileName;
+            this.fileReceiver = fileReceiver;
+
+            ASDU selectFile = NewAsdu(new FileReadAct(ioa, fileName));
+
+            master.SendASDU(selectFile);
+
+            lastSentTime = SystemUtils.currentTimeMillis();
+
+            state = FileClientState.WAITING_FOR_FILE_READY;
+        }
+
+        public void SendFile(int ca, int ioa, string fileName, int fileId, IFileProvider fileProvider)
+        {
+            this.ca = ca;
+            this.ioa = ioa;
+            this.fileName = fileName;
+            this.fileProvider = fileProvider;
+
+            ASDU fileReady = NewAsdu(new FIleWriteAct(ioa, fileName, fileId, (uint)fileProvider.GetFileSize()));
+
+            master.SendASDU(fileReady);
+
+            lastSentTime = SystemUtils.currentTimeMillis();
 
             state = FileClientState.WAITING_FOR_REQUEST_FILE;
         }
@@ -829,11 +1145,11 @@ namespace lib60870.CS101
                 int currentCa = -1;
                 int currentIOA = -1;
 
-                ASDU directoryAsdu = null; 
+                ASDU directoryAsdu = null;
 
                 foreach (CS101n104File file in availableFiles)
                 {
-				
+
                     bool newAsdu = false;
 
                     if (file.provider.GetCA() != currentCa)
@@ -902,7 +1218,7 @@ namespace lib60870.CS101
 
                 availableFiles.Add(new CS101n104File(file));
             }
-				
+
         }
 
         /// <summary>
@@ -931,12 +1247,13 @@ namespace lib60870.CS101
         /// Gets the list of available files
         /// </summary>
         /// <returns>the list of available files</returns>
-        public List<IFileProvider> GetFiles ()
+        public List<IFileProvider> GetFiles()
         {
-            List<IFileProvider> files = new List<IFileProvider> ();
+            List<IFileProvider> files = new List<IFileProvider>();
 
-            foreach (CS101n104File file in availableFiles) {
-                files.Add (file.provider);
+            foreach (CS101n104File file in availableFiles)
+            {
+                files.Add(file.provider);
             }
 
             return files;
@@ -1001,14 +1318,11 @@ namespace lib60870.CS101
         /// Gets or sets the timeout for file transfers
         /// </summary>
         /// <value>timeout in ms</value>
-        public long Timeout 
-        {
-            get 
-            {
+        public long Timeout {
+            get {
                 return timeout;
             }
-            set 
-            {
+            set {
                 timeout = value;
             }
         }
@@ -1019,559 +1333,592 @@ namespace lib60870.CS101
 
             switch (asdu.TypeId)
             {
-            case TypeID.F_FR_NA_1: /* File Ready */
+                case TypeID.F_FR_NA_1: /* File Ready */
 
-                logger ("Received file ready F_FR_NA_1");
+                    logger("Received file ready F_FR_NA_1");
 
-                if (fileReadyHandler != null) {
-
-                    FileReady fileReady = (FileReady)asdu.GetElement (0);
-
-                    fileReceiver = fileReadyHandler (fileReadyHandlerParameter, asdu.Ca, fileReady.ObjectAddress, fileReady.NOF, fileReady.LengthOfFile);
-
-                    if (fileReceiver == null) {
-                        asdu.IsNegative = true;
-                        asdu.Cot = CauseOfTransmission.UNKNOWN_INFORMATION_OBJECT_ADDRESS;
-                        connection.SendASDU (asdu);
-                    } else {
-
-                        ca = asdu.Ca;
-                        ioa = fileReady.ObjectAddress;
-                        nof = fileReady.NOF;
-
-                        // send call file
-
-                        ASDU callFile = new ASDU (alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, asdu.Ca, false);
-
-                        callFile.AddInformationObject (new FileCallOrSelect (fileReady.ObjectAddress, fileReady.NOF, 0, SelectAndCallQualifier.REQUEST_FILE));
-
-                        connection.SendASDU (callFile);
-
-                        lastSentTime = SystemUtils.currentTimeMillis ();
-                        transferState = FileServerState.WAITING_FOR_SECTION_READY;
-                    }
-
-                } else {
-                    asdu.IsNegative = true;
-                    asdu.Cot = CauseOfTransmission.UNKNOWN_INFORMATION_OBJECT_ADDRESS;
-                    connection.SendASDU (asdu);
-                }
-
-                break;
-
-            case TypeID.F_SR_NA_1: /* Section Ready */
-
-                if (transferState == FileServerState.WAITING_FOR_SECTION_READY) {
-
-                    SectionReady sectionReady = (SectionReady)asdu.GetElement (0);
-
-                    currentSectionNumber = sectionReady.NameOfSection;
-                    currentSectionOffset = 0;
-                    currentSectionSize = sectionReady.LengthOfSection;
-
-                    // send call section
-
-                    ASDU callSection = new ASDU (alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, ca, false);
-
-                    callSection.AddInformationObject (new FileCallOrSelect (ioa, nof, (byte)currentSectionNumber, SelectAndCallQualifier.REQUEST_SECTION));
-
-                    connection.SendASDU (callSection);
-                    lastSentTime = SystemUtils.currentTimeMillis ();
-
-                    transferState = FileServerState.RECEIVE_SECTION;
-                } else {
-
-                }
-
-                break;
-
-            case TypeID.F_SG_NA_1: /* Segment */
-
-                if (transferState == FileServerState.RECEIVE_SECTION) {
-
-                    FileSegment segment = (FileSegment)asdu.GetElement (0);
-
-                    logger ("Received F_SG_NA_1(segment) (NoS=" + segment.NameOfSection + ", LoS=" + segment.LengthOfSegment + ")");
-
-                    if (fileReceiver != null) {
-                        fileReceiver.SegmentReceived (segment.NameOfSection, currentSectionOffset, segment.LengthOfSegment, segment.SegmentData);
-                    }
-
-                    currentSectionOffset += segment.LengthOfSegment;
-                } else {
-                    logger ("Unexpected F_SG_NA_1(file segment)");
-                }
-
-
-                break;
-
-            case TypeID.F_LS_NA_1: /* Last Segment/Section */
-
-                logger ("Received F_LS_NA_1 (last segment/section)");
-
-                if (transferState == FileServerState.RECEIVE_SECTION) {
-
-                    FileLastSegmentOrSection lastSection = (FileLastSegmentOrSection)asdu.GetElement (0);
-
-                    if (lastSection.LSQ == LastSectionOrSegmentQualifier.SECTION_TRANSFER_WITHOUT_DEACT) {
-
-                        ASDU sectionAck = new ASDU (alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, asdu.Ca, false);
-
-                        sectionAck.AddInformationObject (new FileACK (ioa, nof, lastSection.NameOfSection, AcknowledgeQualifier.POS_ACK_SECTION, FileError.DEFAULT));
-
-                        connection.SendASDU (sectionAck);
-                        lastSentTime = SystemUtils.currentTimeMillis ();
-
-                        logger ("Send section ACK");
-
-                        transferState = FileServerState.WAITING_FOR_SECTION_READY;
-
-                    } else if (lastSection.LSQ == LastSectionOrSegmentQualifier.FILE_TRANSFER_WITH_DEACT) {
-                        /* master aborted transfer */
-
-                        if (fileReceiver != null)
-                            fileReceiver.Finished (FileErrorCode.ABORTED_BY_REMOTE);
-
-                        transferState = FileServerState.UNSELECTED_IDLE;
-                    } else {
-
-                    }
-
-
-                } else if (transferState == FileServerState.WAITING_FOR_SECTION_READY) {
-
-                    FileLastSegmentOrSection lastSection = (FileLastSegmentOrSection)asdu.GetElement (0);
-
-                    if (lastSection.LSQ == LastSectionOrSegmentQualifier.FILE_TRANSFER_WITHOUT_DEACT) {
-
-                        ASDU fileAck = new ASDU (alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, asdu.Ca, false);
-
-                        fileAck.AddInformationObject(new FileACK (ioa, nof, lastSection.NameOfSection, AcknowledgeQualifier.POS_ACK_FILE, FileError.DEFAULT));
-
-                        connection.SendASDU (fileAck);
-                        lastSentTime = SystemUtils.currentTimeMillis ();
-
-                        logger ("Send file ACK");
-
-                        if (fileReceiver != null)
-                            fileReceiver.Finished (FileErrorCode.SUCCESS);
-
-                        transferState = FileServerState.UNSELECTED_IDLE;
-
-                        logger ("Received file success");
-                    }
-                    else if (lastSection.LSQ == LastSectionOrSegmentQualifier.FILE_TRANSFER_WITH_DEACT) {
-                         /* master aborted transfer */
-
-                        if (fileReceiver != null)
-                            fileReceiver.Finished (FileErrorCode.ABORTED_BY_REMOTE);
-
-                        transferState = FileServerState.UNSELECTED_IDLE;
-                    } else {
-                        logger ("F_LS_NA_1 with unexpected LSQ: " + lastSection.LSQ.ToString ());
-                    }
-                }
-
-                break;
-
-            case TypeID.F_AF_NA_1: /*  124 - ACK file, ACK section */
-
-                logger("Received file/section ACK F_AF_NA_1");
-
-                //TODO move COT check to beginning of function!
-                if (asdu.Cot == CauseOfTransmission.FILE_TRANSFER)
-                {
-
-                    if (transferState != FileServerState.UNSELECTED_IDLE)
+                    if (fileReadyHandler != null)
                     {
 
-                        IFileProvider file = selectedFile.provider;
+                        FileReady fileReady = (FileReady)asdu.GetElement(0);
 
-                        FileACK ack = (FileACK)asdu.GetElement(0);
+                        fileReceiver = fileReadyHandler(fileReadyHandlerParameter, asdu.Ca, fileReady.ObjectAddress, fileReady.NOF, fileReady.LengthOfFile);
 
-                        if (ack.AckQualifier == AcknowledgeQualifier.POS_ACK_FILE)
+                        if (fileReceiver == null)
                         {
-
-                            logger("Received positive file ACK");
-
-                            if (transferState == FileServerState.WAITING_FOR_FILE_ACK)
-                            {
-
-                                selectedFile.provider.TransferComplete(true);
-                                selectedFile.selectedBy = null;
-
-                                availableFiles.RemoveFile(selectedFile.provider);
-
-                                selectedFile = null;
-
-                                transferState = FileServerState.UNSELECTED_IDLE;
-                            }
-                            else
-                            {
-                                logger("Unexpected file transfer state --> abort file transfer");
-
-                                transferState = FileServerState.SEND_ABORT;
-                            }
-
-
-                        }
-                        else if (ack.AckQualifier == AcknowledgeQualifier.NEG_ACK_FILE)
-                        {
-
-                            logger("Received negative file ACK - stop transfer");
-
-                            if (transferState == FileServerState.WAITING_FOR_FILE_ACK)
-                            {
-
-                                selectedFile.provider.TransferComplete(false);
-
-                                selectedFile.selectedBy = null;
-                                selectedFile = null;
-
-                                transferState = FileServerState.UNSELECTED_IDLE;
-                            }
-                            else
-                            {
-                                logger("Unexpected file transfer state --> abort file transfer");
-
-                                transferState = FileServerState.SEND_ABORT;
-                            }
-
-                        }
-                        else if (ack.AckQualifier == AcknowledgeQualifier.NEG_ACK_SECTION)
-                        {
-
-                            logger("Received negative file section ACK - repeat section");
-
-                            if (transferState == FileServerState.WAITING_FOR_SECTION_ACK)
-                            {
-                                currentSectionOffset = 0;
-                                sectionChecksum = 0;
-
-                                ASDU sectionReady = new ASDU(alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, file.GetCA(), false);
-
-                                sectionReady.AddInformationObject(
-                                    new SectionReady(selectedFile.provider.GetIOA(), selectedFile.provider.GetNameOfFile(), currentSectionNumber, currentSectionSize, false));
-
-                                connection.SendASDU(sectionReady);
-
-
-                                transferState = FileServerState.TRANSMIT_SECTION;
-                            }
-                            else
-                            {
-                                logger("Unexpected file transfer state --> abort file transfer");
-
-                                transferState = FileServerState.SEND_ABORT;
-                            }
-
-                        }
-                        else if (ack.AckQualifier == AcknowledgeQualifier.POS_ACK_SECTION)
-                        {
-
-                            if (transferState == FileServerState.WAITING_FOR_SECTION_ACK)
-                            {
-                                currentSectionNumber++;
-
-                                int nextSectionSize = 
-                                    selectedFile.provider.GetSectionSize(currentSectionNumber - 1);
-
-                                currentSectionOffset = 0;
-
-                                ASDU responseAsdu = new ASDU(alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, file.GetCA(), false);
-
-                                if (nextSectionSize == -1)
-                                {
-                                    logger("Received positive file section ACK - send last section indication");
-
-                                    responseAsdu.AddInformationObject(
-                                        new FileLastSegmentOrSection(file.GetIOA(), file.GetNameOfFile(), 
-                                            (byte)currentSectionNumber, 
-                                            LastSectionOrSegmentQualifier.FILE_TRANSFER_WITHOUT_DEACT,
-                                            fileChecksum));
-
-                                    transferState = FileServerState.WAITING_FOR_FILE_ACK;
-                                }
-                                else
-                                {
-                                    logger("Received positive file section ACK - send next section ready indication");
-
-                                    currentSectionSize = nextSectionSize;
-
-                                    responseAsdu.AddInformationObject(
-                                        new SectionReady(selectedFile.provider.GetIOA(), selectedFile.provider.GetNameOfFile(), currentSectionNumber, currentSectionSize, false));
-
-                                    transferState = FileServerState.WAITING_FOR_SECTION_CALL;
-                                }
-
-                                connection.SendASDU(responseAsdu);
-
-                                lastSentTime = SystemUtils.currentTimeMillis ();
-
-                                sectionChecksum = 0;
-                            }
-                            else
-                            {
-                                logger("Unexpected file transfer state --> abort file transfer");
-
-                                transferState = FileServerState.SEND_ABORT;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        // No file transmission in progress --> what to do?
-                        logger("Unexpected File ACK message -> ignore");
-                    }
-
-                }
-                else
-                {
-                    asdu.Cot = CauseOfTransmission.UNKNOWN_CAUSE_OF_TRANSMISSION;
-                    connection.SendASDU(asdu);
-                }
-                break;
-
-            case TypeID.F_SC_NA_1: /* 122 - Call/Select directory/file/section */
-
-                logger("Received call/select F_SC_NA_1");
-
-                if (asdu.Cot == CauseOfTransmission.FILE_TRANSFER)
-                {
-
-                    FileCallOrSelect sc = (FileCallOrSelect)asdu.GetElement(0);
-
-
-                    if (sc.SCQ == SelectAndCallQualifier.SELECT_FILE)
-                    {
-
-                        if (transferState == FileServerState.UNSELECTED_IDLE)
-                        {
-
-                            logger("Received SELECT FILE");
-
-                            CS101n104File file = availableFiles.GetFile(asdu.Ca, sc.ObjectAddress, sc.NOF);
-
-                            if (file == null)
-                            {
-                                asdu.Cot = CauseOfTransmission.UNKNOWN_INFORMATION_OBJECT_ADDRESS;
-                                connection.SendASDU(asdu);
-                            }
-                            else
-                            {
-
-                                ASDU fileReady = new ASDU(alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, asdu.Ca, false);
-
-                                // check if already selected
-                                if (file.selectedBy == null)
-                                {
-                                    file.selectedBy = this;
-
-                                    fileReady.AddInformationObject(new FileReady(sc.ObjectAddress, sc.NOF, file.provider.GetFileSize(), true));
-
-                                    lastSentTime = SystemUtils.currentTimeMillis ();
-
-                                    selectedFile = file;
-
-                                    transferState = FileServerState.WAITING_FOR_FILE_CALL;
-
-                                }
-                                else
-                                {
-                                    fileReady.AddInformationObject(new FileReady(sc.ObjectAddress, sc.NOF, 0, false));
-
-                                    transferState = FileServerState.UNSELECTED_IDLE;
-                                }
-
-                                connection.SendASDU(fileReady);
-
-
-                            }
-
+                            asdu.IsNegative = true;
+                            asdu.Cot = CauseOfTransmission.UNKNOWN_INFORMATION_OBJECT_ADDRESS;
+                            connection.SendASDU(asdu);
                         }
                         else
                         {
-                            logger("Unexpected SELECT FILE message");
+
+                            ca = asdu.Ca;
+                            ioa = fileReady.ObjectAddress;
+                            nof = fileReady.NOF;
+
+                            // send call file
+
+                            ASDU callFile = new ASDU(alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, asdu.Ca, false);
+
+                            callFile.AddInformationObject(new FileCallOrSelect(fileReady.ObjectAddress, fileReady.NOF, 0, SelectAndCallQualifier.REQUEST_FILE));
+
+                            connection.SendASDU(callFile);
+
+                            lastSentTime = SystemUtils.currentTimeMillis();
+                            transferState = FileServerState.WAITING_FOR_SECTION_READY;
                         }
 
                     }
-                    else if (sc.SCQ == SelectAndCallQualifier.DEACTIVATE_FILE)
+                    else
+                    {
+                        asdu.IsNegative = true;
+                        asdu.Cot = CauseOfTransmission.UNKNOWN_INFORMATION_OBJECT_ADDRESS;
+                        connection.SendASDU(asdu);
+                    }
+
+                    break;
+
+                case TypeID.F_SR_NA_1: /* Section Ready */
+
+                    if (transferState == FileServerState.WAITING_FOR_SECTION_READY)
                     {
 
-                        logger("Received DEACTIVATE FILE");
+                        SectionReady sectionReady = (SectionReady)asdu.GetElement(0);
+
+                        currentSectionNumber = sectionReady.NameOfSection;
+                        currentSectionOffset = 0;
+                        currentSectionSize = sectionReady.LengthOfSection;
+
+                        // send call section
+
+                        ASDU callSection = new ASDU(alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, ca, false);
+
+                        callSection.AddInformationObject(new FileCallOrSelect(ioa, nof, (byte)currentSectionNumber, SelectAndCallQualifier.REQUEST_SECTION));
+
+                        connection.SendASDU(callSection);
+                        lastSentTime = SystemUtils.currentTimeMillis();
+
+                        transferState = FileServerState.RECEIVE_SECTION;
+                    }
+                    else
+                    {
+
+                    }
+
+                    break;
+
+                case TypeID.F_SG_NA_1: /* Segment */
+
+                    if (transferState == FileServerState.RECEIVE_SECTION)
+                    {
+
+                        FileSegment segment = (FileSegment)asdu.GetElement(0);
+
+                        logger("Received F_SG_NA_1(segment) (NoS=" + segment.NameOfSection + ", LoS=" + segment.LengthOfSegment + ")");
+
+                        if (fileReceiver != null)
+                        {
+                            fileReceiver.SegmentReceived(segment.NameOfSection, currentSectionOffset, segment.LengthOfSegment, segment.SegmentData);
+                        }
+
+                        currentSectionOffset += segment.LengthOfSegment;
+                    }
+                    else
+                    {
+                        logger("Unexpected F_SG_NA_1(file segment)");
+                    }
+
+
+                    break;
+
+                case TypeID.F_LS_NA_1: /* Last Segment/Section */
+
+                    logger("Received F_LS_NA_1 (last segment/section)");
+
+                    if (transferState == FileServerState.RECEIVE_SECTION)
+                    {
+
+                        FileLastSegmentOrSection lastSection = (FileLastSegmentOrSection)asdu.GetElement(0);
+
+                        if (lastSection.LSQ == LastSectionOrSegmentQualifier.SECTION_TRANSFER_WITHOUT_DEACT)
+                        {
+
+                            ASDU sectionAck = new ASDU(alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, asdu.Ca, false);
+
+                            sectionAck.AddInformationObject(new FileACK(ioa, nof, lastSection.NameOfSection, AcknowledgeQualifier.POS_ACK_SECTION, FileError.DEFAULT));
+
+                            connection.SendASDU(sectionAck);
+                            lastSentTime = SystemUtils.currentTimeMillis();
+
+                            logger("Send section ACK");
+
+                            transferState = FileServerState.WAITING_FOR_SECTION_READY;
+
+                        }
+                        else if (lastSection.LSQ == LastSectionOrSegmentQualifier.FILE_TRANSFER_WITH_DEACT)
+                        {
+                            /* master aborted transfer */
+
+                            if (fileReceiver != null)
+                                fileReceiver.Finished(FileErrorCode.ABORTED_BY_REMOTE);
+
+                            transferState = FileServerState.UNSELECTED_IDLE;
+                        }
+                        else
+                        {
+
+                        }
+
+
+                    }
+                    else if (transferState == FileServerState.WAITING_FOR_SECTION_READY)
+                    {
+
+                        FileLastSegmentOrSection lastSection = (FileLastSegmentOrSection)asdu.GetElement(0);
+
+                        if (lastSection.LSQ == LastSectionOrSegmentQualifier.FILE_TRANSFER_WITHOUT_DEACT)
+                        {
+
+                            ASDU fileAck = new ASDU(alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, asdu.Ca, false);
+
+                            fileAck.AddInformationObject(new FileACK(ioa, nof, lastSection.NameOfSection, AcknowledgeQualifier.POS_ACK_FILE, FileError.DEFAULT));
+
+                            connection.SendASDU(fileAck);
+                            lastSentTime = SystemUtils.currentTimeMillis();
+
+                            logger("Send file ACK");
+
+                            if (fileReceiver != null)
+                                fileReceiver.Finished(FileErrorCode.SUCCESS);
+
+                            transferState = FileServerState.UNSELECTED_IDLE;
+
+                            logger("Received file success");
+                        }
+                        else if (lastSection.LSQ == LastSectionOrSegmentQualifier.FILE_TRANSFER_WITH_DEACT)
+                        {
+                            /* master aborted transfer */
+
+                            if (fileReceiver != null)
+                                fileReceiver.Finished(FileErrorCode.ABORTED_BY_REMOTE);
+
+                            transferState = FileServerState.UNSELECTED_IDLE;
+                        }
+                        else
+                        {
+                            logger("F_LS_NA_1 with unexpected LSQ: " + lastSection.LSQ.ToString());
+                        }
+                    }
+
+                    break;
+
+                case TypeID.F_AF_NA_1: /*  124 - ACK file, ACK section */
+
+                    logger("Received file/section ACK F_AF_NA_1");
+
+                    //TODO move COT check to beginning of function!
+                    if (asdu.Cot == CauseOfTransmission.FILE_TRANSFER)
+                    {
 
                         if (transferState != FileServerState.UNSELECTED_IDLE)
                         {
 
-                            if (selectedFile != null)
+                            IFileProvider file = selectedFile.provider;
+
+                            FileACK ack = (FileACK)asdu.GetElement(0);
+
+                            if (ack.AckQualifier == AcknowledgeQualifier.POS_ACK_FILE)
                             {
-                                selectedFile.selectedBy = null;
-                                selectedFile = null;
+
+                                logger("Received positive file ACK");
+
+                                if (transferState == FileServerState.WAITING_FOR_FILE_ACK)
+                                {
+
+                                    selectedFile.provider.TransferComplete(true);
+                                    selectedFile.selectedBy = null;
+
+                                    availableFiles.RemoveFile(selectedFile.provider);
+
+                                    selectedFile = null;
+
+                                    transferState = FileServerState.UNSELECTED_IDLE;
+                                }
+                                else
+                                {
+                                    logger("Unexpected file transfer state --> abort file transfer");
+
+                                    transferState = FileServerState.SEND_ABORT;
+                                }
+
+
                             }
-
-                            transferState = FileServerState.UNSELECTED_IDLE;
-
-                        }
-                        else
-                        {
-                            logger("Unexpected DEACTIVATE FILE message");
-                        }
-
-                    }
-                    else if (sc.SCQ == SelectAndCallQualifier.REQUEST_FILE)
-                    {
-
-                        logger("Received CALL FILE");
-
-                        if (transferState == FileServerState.WAITING_FOR_FILE_CALL)
-                        {
-
-                            if (selectedFile.provider.GetIOA() != sc.ObjectAddress)
+                            else if (ack.AckQualifier == AcknowledgeQualifier.NEG_ACK_FILE)
                             {
-                                logger("Unkown IOA");
-                                asdu.IsNegative = true;
-                                asdu.Cot = CauseOfTransmission.UNKNOWN_INFORMATION_OBJECT_ADDRESS;
-                                connection.SendASDU(asdu);
+
+                                logger("Received negative file ACK - stop transfer");
+
+                                if (transferState == FileServerState.WAITING_FOR_FILE_ACK)
+                                {
+
+                                    selectedFile.provider.TransferComplete(false);
+
+                                    selectedFile.selectedBy = null;
+                                    selectedFile = null;
+
+                                    transferState = FileServerState.UNSELECTED_IDLE;
+                                }
+                                else
+                                {
+                                    logger("Unexpected file transfer state --> abort file transfer");
+
+                                    transferState = FileServerState.SEND_ABORT;
+                                }
+
                             }
-                            else
+                            else if (ack.AckQualifier == AcknowledgeQualifier.NEG_ACK_SECTION)
                             {
 
-                                ASDU sectionReady = new ASDU(alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, asdu.Ca, false);
+                                logger("Received negative file section ACK - repeat section");
 
-                                currentSectionNumber = 1;
-                                currentSectionOffset = 0;
-                                currentSectionSize = selectedFile.provider.GetSectionSize (0);
+                                if (transferState == FileServerState.WAITING_FOR_SECTION_ACK)
+                                {
+                                    currentSectionOffset = 0;
+                                    sectionChecksum = 0;
 
-                                sectionReady.AddInformationObject(new SectionReady(sc.ObjectAddress, selectedFile.provider.GetNameOfFile(), currentSectionNumber, currentSectionSize, false));
+                                    ASDU sectionReady = new ASDU(alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, file.GetCA(), false);
 
-                                connection.SendASDU(sectionReady);
+                                    sectionReady.AddInformationObject(
+                                        new SectionReady(selectedFile.provider.GetIOA(), selectedFile.provider.GetNameOfFile(), currentSectionNumber, currentSectionSize, false));
 
-                                lastSentTime = SystemUtils.currentTimeMillis ();
+                                    connection.SendASDU(sectionReady);
 
-                                logger ("Send SECTION READY");
 
-                                transferState = FileServerState.WAITING_FOR_SECTION_CALL;
+                                    transferState = FileServerState.TRANSMIT_SECTION;
+                                }
+                                else
+                                {
+                                    logger("Unexpected file transfer state --> abort file transfer");
+
+                                    transferState = FileServerState.SEND_ABORT;
+                                }
+
                             }
-
-                        }
-                        else
-                        {
-                            logger("Unexpected FILE CALL message");
-                        }
-
-
-                    }
-                    else if (sc.SCQ == SelectAndCallQualifier.REQUEST_SECTION)
-                    {
-
-                        logger ("Received CALL SECTION (NoS=" + sc.NameOfSection + ") current section: " + currentSectionNumber);
-
-                        if (transferState == FileServerState.WAITING_FOR_SECTION_CALL)
-                        {
-
-                            if (selectedFile.provider.GetIOA() != sc.ObjectAddress)
+                            else if (ack.AckQualifier == AcknowledgeQualifier.POS_ACK_SECTION)
                             {
-                                logger("Unkown IOA");
-                                asdu.IsNegative = true;
-                                asdu.Cot = CauseOfTransmission.UNKNOWN_INFORMATION_OBJECT_ADDRESS;
-                                connection.SendASDU(asdu);
-                            }
-                            else
-                            {
-                                if (asdu.IsNegative) {
 
+                                if (transferState == FileServerState.WAITING_FOR_SECTION_ACK)
+                                {
                                     currentSectionNumber++;
+
+                                    int nextSectionSize =
+                                        selectedFile.provider.GetSectionSize(currentSectionNumber - 1);
+
                                     currentSectionOffset = 0;
 
-                                    currentSectionSize = selectedFile.provider.GetSectionSize (currentSectionNumber - 1);
+                                    ASDU responseAsdu = new ASDU(alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, file.GetCA(), false);
 
-                                    if (currentSectionSize > 0) {
+                                    if (nextSectionSize == -1)
+                                    {
+                                        logger("Received positive file section ACK - send last section indication");
 
-                                        // send section ready with new section number
-
-                                        ASDU sectionReady = new ASDU (alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, asdu.Ca, false);
-
-                                        currentSectionSize = selectedFile.provider.GetSectionSize (0);
-
-                                        sectionReady.AddInformationObject (new SectionReady (sc.ObjectAddress, selectedFile.provider.GetNameOfFile (), currentSectionNumber, currentSectionSize, false));
-
-                                        connection.SendASDU (sectionReady);
-
-                                        lastSentTime = SystemUtils.currentTimeMillis ();
-
-                                        logger ("Send F_SR_NA_1 (section ready) (NoS = " + currentSectionNumber + ")");
-
-                                        transferState = FileServerState.WAITING_FOR_SECTION_CALL;
-
-                                    } else {
-                                        // send last section PDU
-
-                                        ASDU lastSection = new ASDU (alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, asdu.Ca, false);
-
-
-                                        lastSection.AddInformationObject (
-                                               new FileLastSegmentOrSection (selectedFile.provider.GetIOA (), selectedFile.provider.GetNameOfFile (),
+                                        responseAsdu.AddInformationObject(
+                                            new FileLastSegmentOrSection(file.GetIOA(), file.GetNameOfFile(),
                                                 (byte)currentSectionNumber,
                                                 LastSectionOrSegmentQualifier.FILE_TRANSFER_WITHOUT_DEACT,
                                                 fileChecksum));
 
-                                        connection.SendASDU (lastSection);
-
-                                        logger ("Send F_LS_NA_1 (last section))");
-
-                                        lastSentTime = SystemUtils.currentTimeMillis ();
-
                                         transferState = FileServerState.WAITING_FOR_FILE_ACK;
                                     }
+                                    else
+                                    {
+                                        logger("Received positive file section ACK - send next section ready indication");
 
-                                } 
-                                else {
-                                    currentSectionSize = selectedFile.provider.GetSectionSize (sc.NameOfSection - 1);
+                                        currentSectionSize = nextSectionSize;
 
-                                    if (currentSectionSize > 0) {
-                                        currentSectionNumber = sc.NameOfSection;
-                                        currentSectionOffset = 0;
+                                        responseAsdu.AddInformationObject(
+                                            new SectionReady(selectedFile.provider.GetIOA(), selectedFile.provider.GetNameOfFile(), currentSectionNumber, currentSectionSize, false));
 
-                                        transferState = FileServerState.TRANSMIT_SECTION;
-                                    } else {
-                                        logger ("Unexpected number of section");
-                                        logger ("Send negative confirm");
-                                        asdu.IsNegative = true;
-
-                                        lastSentTime = SystemUtils.currentTimeMillis ();
-
-                                        connection.SendASDU (asdu);
+                                        transferState = FileServerState.WAITING_FOR_SECTION_CALL;
                                     }
-                                }
 
-                                  
+                                    connection.SendASDU(responseAsdu);
+
+                                    lastSentTime = SystemUtils.currentTimeMillis();
+
+                                    sectionChecksum = 0;
+                                }
+                                else
+                                {
+                                    logger("Unexpected file transfer state --> abort file transfer");
+
+                                    transferState = FileServerState.SEND_ABORT;
+                                }
                             }
                         }
                         else
                         {
-                            logger("Unexpected SECTION CALL message");
+                            // No file transmission in progress --> what to do?
+                            logger("Unexpected File ACK message -> ignore");
                         }
+
                     }
+                    else
+                    {
+                        asdu.Cot = CauseOfTransmission.UNKNOWN_CAUSE_OF_TRANSMISSION;
+                        connection.SendASDU(asdu);
+                    }
+                    break;
 
-                }
-                else if (asdu.Cot == CauseOfTransmission.REQUEST)
-                {
-                    logger("Call directory received");
+                case TypeID.F_SC_NA_1: /* 122 - Call/Select directory/file/section */
 
-                    availableFiles.SendDirectoy(connection, false);
+                    logger("Received call/select F_SC_NA_1");
 
-                }
-                else
-                {
-                    asdu.IsNegative = true;
-                    asdu.Cot = CauseOfTransmission.UNKNOWN_CAUSE_OF_TRANSMISSION;
-                    connection.SendASDU(asdu);
-                }
-                break;
+                    if (asdu.Cot == CauseOfTransmission.FILE_TRANSFER)
+                    {
 
-            default:
-                handled = false;
-                break;
+                        FileCallOrSelect sc = (FileCallOrSelect)asdu.GetElement(0);
+
+
+                        if (sc.SCQ == SelectAndCallQualifier.SELECT_FILE)
+                        {
+
+                            if (transferState == FileServerState.UNSELECTED_IDLE)
+                            {
+
+                                logger("Received SELECT FILE");
+
+                                CS101n104File file = availableFiles.GetFile(asdu.Ca, sc.ObjectAddress, sc.NOF);
+
+                                if (file == null)
+                                {
+                                    asdu.Cot = CauseOfTransmission.UNKNOWN_INFORMATION_OBJECT_ADDRESS;
+                                    connection.SendASDU(asdu);
+                                }
+                                else
+                                {
+
+                                    ASDU fileReady = new ASDU(alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, asdu.Ca, false);
+
+                                    // check if already selected
+                                    if (file.selectedBy == null)
+                                    {
+                                        file.selectedBy = this;
+
+                                        fileReady.AddInformationObject(new FileReady(sc.ObjectAddress, sc.NOF, file.provider.GetFileSize(), true));
+
+                                        lastSentTime = SystemUtils.currentTimeMillis();
+
+                                        selectedFile = file;
+
+                                        transferState = FileServerState.WAITING_FOR_FILE_CALL;
+
+                                    }
+                                    else
+                                    {
+                                        fileReady.AddInformationObject(new FileReady(sc.ObjectAddress, sc.NOF, 0, false));
+
+                                        transferState = FileServerState.UNSELECTED_IDLE;
+                                    }
+
+                                    connection.SendASDU(fileReady);
+
+
+                                }
+
+                            }
+                            else
+                            {
+                                logger("Unexpected SELECT FILE message");
+                            }
+
+                        }
+                        else if (sc.SCQ == SelectAndCallQualifier.DEACTIVATE_FILE)
+                        {
+
+                            logger("Received DEACTIVATE FILE");
+
+                            if (transferState != FileServerState.UNSELECTED_IDLE)
+                            {
+
+                                if (selectedFile != null)
+                                {
+                                    selectedFile.selectedBy = null;
+                                    selectedFile = null;
+                                }
+
+                                transferState = FileServerState.UNSELECTED_IDLE;
+
+                            }
+                            else
+                            {
+                                logger("Unexpected DEACTIVATE FILE message");
+                            }
+
+                        }
+                        else if (sc.SCQ == SelectAndCallQualifier.REQUEST_FILE)
+                        {
+
+                            logger("Received CALL FILE");
+
+                            if (transferState == FileServerState.WAITING_FOR_FILE_CALL)
+                            {
+
+                                if (selectedFile.provider.GetIOA() != sc.ObjectAddress)
+                                {
+                                    logger("Unkown IOA");
+                                    asdu.IsNegative = true;
+                                    asdu.Cot = CauseOfTransmission.UNKNOWN_INFORMATION_OBJECT_ADDRESS;
+                                    connection.SendASDU(asdu);
+                                }
+                                else
+                                {
+
+                                    ASDU sectionReady = new ASDU(alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, asdu.Ca, false);
+
+                                    currentSectionNumber = 1;
+                                    currentSectionOffset = 0;
+                                    currentSectionSize = selectedFile.provider.GetSectionSize(0);
+
+                                    sectionReady.AddInformationObject(new SectionReady(sc.ObjectAddress, selectedFile.provider.GetNameOfFile(), currentSectionNumber, currentSectionSize, false));
+
+                                    connection.SendASDU(sectionReady);
+
+                                    lastSentTime = SystemUtils.currentTimeMillis();
+
+                                    logger("Send SECTION READY");
+
+                                    transferState = FileServerState.WAITING_FOR_SECTION_CALL;
+                                }
+
+                            }
+                            else
+                            {
+                                logger("Unexpected FILE CALL message");
+                            }
+
+
+                        }
+                        else if (sc.SCQ == SelectAndCallQualifier.REQUEST_SECTION)
+                        {
+
+                            logger("Received CALL SECTION (NoS=" + sc.NameOfSection + ") current section: " + currentSectionNumber);
+
+                            if (transferState == FileServerState.WAITING_FOR_SECTION_CALL)
+                            {
+
+                                if (selectedFile.provider.GetIOA() != sc.ObjectAddress)
+                                {
+                                    logger("Unkown IOA");
+                                    asdu.IsNegative = true;
+                                    asdu.Cot = CauseOfTransmission.UNKNOWN_INFORMATION_OBJECT_ADDRESS;
+                                    connection.SendASDU(asdu);
+                                }
+                                else
+                                {
+                                    if (asdu.IsNegative)
+                                    {
+
+                                        currentSectionNumber++;
+                                        currentSectionOffset = 0;
+
+                                        currentSectionSize = selectedFile.provider.GetSectionSize(currentSectionNumber - 1);
+
+                                        if (currentSectionSize > 0)
+                                        {
+
+                                            // send section ready with new section number
+
+                                            ASDU sectionReady = new ASDU(alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, asdu.Ca, false);
+
+                                            currentSectionSize = selectedFile.provider.GetSectionSize(0);
+
+                                            sectionReady.AddInformationObject(new SectionReady(sc.ObjectAddress, selectedFile.provider.GetNameOfFile(), currentSectionNumber, currentSectionSize, false));
+
+                                            connection.SendASDU(sectionReady);
+
+                                            lastSentTime = SystemUtils.currentTimeMillis();
+
+                                            logger("Send F_SR_NA_1 (section ready) (NoS = " + currentSectionNumber + ")");
+
+                                            transferState = FileServerState.WAITING_FOR_SECTION_CALL;
+
+                                        }
+                                        else
+                                        {
+                                            // send last section PDU
+
+                                            ASDU lastSection = new ASDU(alParameters, CauseOfTransmission.FILE_TRANSFER, false, false, 0, asdu.Ca, false);
+
+
+                                            lastSection.AddInformationObject(
+                                                   new FileLastSegmentOrSection(selectedFile.provider.GetIOA(), selectedFile.provider.GetNameOfFile(),
+                                                    (byte)currentSectionNumber,
+                                                    LastSectionOrSegmentQualifier.FILE_TRANSFER_WITHOUT_DEACT,
+                                                    fileChecksum));
+
+                                            connection.SendASDU(lastSection);
+
+                                            logger("Send F_LS_NA_1 (last section))");
+
+                                            lastSentTime = SystemUtils.currentTimeMillis();
+
+                                            transferState = FileServerState.WAITING_FOR_FILE_ACK;
+                                        }
+
+                                    }
+                                    else
+                                    {
+                                        currentSectionSize = selectedFile.provider.GetSectionSize(sc.NameOfSection - 1);
+
+                                        if (currentSectionSize > 0)
+                                        {
+                                            currentSectionNumber = sc.NameOfSection;
+                                            currentSectionOffset = 0;
+
+                                            transferState = FileServerState.TRANSMIT_SECTION;
+                                        }
+                                        else
+                                        {
+                                            logger("Unexpected number of section");
+                                            logger("Send negative confirm");
+                                            asdu.IsNegative = true;
+
+                                            lastSentTime = SystemUtils.currentTimeMillis();
+
+                                            connection.SendASDU(asdu);
+                                        }
+                                    }
+
+
+                                }
+                            }
+                            else
+                            {
+                                logger("Unexpected SECTION CALL message");
+                            }
+                        }
+
+                    }
+                    else if (asdu.Cot == CauseOfTransmission.REQUEST)
+                    {
+                        logger("Call directory received");
+
+                        availableFiles.SendDirectoy(connection, false);
+
+                    }
+                    else
+                    {
+                        asdu.IsNegative = true;
+                        asdu.Cot = CauseOfTransmission.UNKNOWN_CAUSE_OF_TRANSMISSION;
+                        connection.SendASDU(asdu);
+                    }
+                    break;
+
+                default:
+                    handled = false;
+                    break;
             }
 
             return handled;
@@ -1601,8 +1948,8 @@ namespace lib60870.CS101
                             // send last segment
 
                             fileAsdu.AddInformationObject(
-                                new FileLastSegmentOrSection(file.GetIOA(), file.GetNameOfFile(), 
-                                    currentSectionNumber, 
+                                new FileLastSegmentOrSection(file.GetIOA(), file.GetNameOfFile(),
+                                    currentSectionNumber,
                                     LastSectionOrSegmentQualifier.SECTION_TRANSFER_WITHOUT_DEACT,
                                     sectionChecksum));
 
@@ -1614,7 +1961,7 @@ namespace lib60870.CS101
 
                             connection.SendASDU(fileAsdu);
 
-                            lastSentTime = SystemUtils.currentTimeMillis ();
+                            lastSentTime = SystemUtils.currentTimeMillis();
 
                             transferState = FileServerState.WAITING_FOR_SECTION_ACK;
 
@@ -1635,7 +1982,7 @@ namespace lib60870.CS101
                                 segmentData);
 
                             fileAsdu.AddInformationObject(
-                                new FileSegment(file.GetIOA(), file.GetNameOfFile(), currentSectionNumber, 
+                                new FileSegment(file.GetIOA(), file.GetNameOfFile(), currentSectionNumber,
                                     segmentData));
 
                             byte checksum = 0;
@@ -1647,11 +1994,11 @@ namespace lib60870.CS101
 
                             connection.SendASDU(fileAsdu);
 
-                            lastSentTime = SystemUtils.currentTimeMillis ();
+                            lastSentTime = SystemUtils.currentTimeMillis();
 
                             sectionChecksum += checksum;
 
-                            logger("Send SEGMENT (NoS=" + currentSectionNumber +  ", CHS=" + sectionChecksum + ")");
+                            logger("Send SEGMENT (NoS=" + currentSectionNumber + ", CHS=" + sectionChecksum + ")");
                             currentSectionOffset += currentSegmentSize;
 
                         }
@@ -1659,10 +2006,12 @@ namespace lib60870.CS101
                 }
 
                 // check for timeout
-                if (SystemUtils.currentTimeMillis () > lastSentTime + timeout) {
-                    logger ("Abort file transfer due to timeout");
+                if (SystemUtils.currentTimeMillis() > lastSentTime + timeout)
+                {
+                    logger("Abort file transfer due to timeout");
 
-                    if (selectedFile != null) {
+                    if (selectedFile != null)
+                    {
                         selectedFile.selectedBy = null;
                         selectedFile = null;
                     }

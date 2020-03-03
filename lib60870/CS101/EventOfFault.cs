@@ -81,6 +81,8 @@ namespace lib60870.CS101
             remoteMeasureCount = msg[startIndex++];
             remoteMeasureTI = (TypeID)msg[startIndex++];
 
+            measureValues = new List<InformationObject>();
+
             switch (RemoteMeasureTI)
             {
                 case TypeID.M_ME_NA_1: /* 9 */
@@ -111,7 +113,7 @@ namespace lib60870.CS101
             return retVal;
         }
 
-        public InformationObject GetMeasureElement(ApplicationLayerParameters parameters, byte[] msg, int startIndex)
+        private InformationObject GetMeasureElement(ApplicationLayerParameters parameters, byte[] msg, int startIndex)
         {
             InformationObject retVal = null;
 

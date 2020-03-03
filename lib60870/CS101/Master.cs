@@ -28,7 +28,7 @@ namespace lib60870.CS101
     /// <summary>
     /// Handler that is called when a new ASDU is received
     /// </summary>
-	public delegate bool ASDUReceivedHandler(object parameter,int slaveAddress,ASDU asdu);
+	public delegate bool ASDUReceivedHandler(object parameter, int slaveAddress, ASDU asdu);
 
     /// <summary>
     /// Common interface for CS104 and CS101 balanced and unbalanced master
@@ -38,14 +38,11 @@ namespace lib60870.CS101
 
         protected bool debugOutput;
 
-        public bool DebugOutput
-        {
-            get
-            {
+        public bool DebugOutput {
+            get {
                 return this.debugOutput;
             }
-            set
-            {
+            set {
                 debugOutput = value;
             }
         }
@@ -161,6 +158,7 @@ namespace lib60870.CS101
         /// <param name="nof">Name of file (file type)</param>
         /// <param name="receiver">file receiver instance</param>
         public abstract void GetFile(int ca, int ioa, NameOfFile nof, IFileReceiver receiver);
+        public abstract void GetFile(int ca, int ioa, string nof, IFileReceiver receiver);
 
         /// <summary>
         /// Sends the file to slave (download file)
@@ -169,7 +167,8 @@ namespace lib60870.CS101
         /// <param name="ioa">IOA</param>
         /// <param name="nof">Name of file (file type)</param>
         /// <param name="fileProvider">File provider instance</param>
-        public abstract void SendFile (int ca, int ioa, NameOfFile nof, IFileProvider fileProvider);
+        public abstract void SendFile(int ca, int ioa, NameOfFile nof, IFileProvider fileProvider);
+        public abstract void SendFile(int ca, int ioa, string nof, int fileId, IFileProvider fileProvider);
 
         /// <summary>
         /// Get the application layer parameters used by this master instance
@@ -192,6 +191,6 @@ namespace lib60870.CS101
         public abstract void SetSentRawMessageHandler(RawMessageHandler handler, object parameter);
 
     }
-		
+
 }
 
