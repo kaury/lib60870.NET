@@ -1994,6 +1994,60 @@ namespace lib60870.CS104
 
             SendASDU(getDirectoryAsdu);
         }
+
+        public void SwitchSettingArea(int ca, ushort sn)
+        {
+            ASDU asdu = new ASDU(alParameters, CauseOfTransmission.ACTIVATION, false, false, (byte)alParameters.OA, ca, false);
+
+            asdu.AddInformationObject(new SwitchSettingArea(0, sn));
+
+            SendASDUInternal(asdu);
+
+        }
+        public void ReadCurrentSettingArea(int ca)
+        {
+            ASDU asdu = new ASDU(alParameters, CauseOfTransmission.ACTIVATION, false, false, (byte)alParameters.OA, ca, false);
+
+            asdu.AddInformationObject(new ReadCurrentSettingArea());
+
+            SendASDUInternal(asdu);
+
+        }
+        public void ReadParameters(int ca, ushort sn)
+        {
+            ASDU asdu = new ASDU(alParameters, CauseOfTransmission.ACTIVATION, false, false, (byte)alParameters.OA, ca, false);
+
+            asdu.AddInformationObject(new ReadParameters(sn));
+
+            SendASDUInternal(asdu);
+
+        }
+        public void ReadParameters(int ca, ushort sn, int[] ioas)
+        {
+            ASDU asdu = new ASDU(alParameters, CauseOfTransmission.ACTIVATION, false, false, (byte)alParameters.OA, ca, false);
+
+            asdu.AddInformationObject(new ReadParameters(sn, ioas));
+
+            SendASDUInternal(asdu);
+
+        }
+        public void WriteParameters(CauseOfTransmission cot, int ca, ushort sn, ParameterIdentification pi, List<Parameter> parameters)
+        {
+            ASDU asdu = new ASDU(alParameters, cot, false, false, (byte)alParameters.OA, ca, false);//CauseOfTransmission.ACTIVATION \ CauseOfTransmission.DEACTIVATION
+
+            asdu.AddInformationObject(new WriteParameters(sn, pi, parameters));
+
+            SendASDUInternal(asdu);
+
+        }
+        public void SoftwareUpdate(CauseOfTransmission cot, int ca, int ioa, SetpointCommandQualifier ctype)
+        {
+            ASDU asdu = new ASDU(alParameters, cot, false, false, (byte)alParameters.OA, ca, false);
+
+            asdu.AddInformationObject(new SoftwareUpdateCommand(ioa, ctype));
+
+            SendASDUInternal(asdu);
+        }
     }
 }
 
