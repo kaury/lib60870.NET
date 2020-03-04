@@ -219,9 +219,9 @@ namespace lib60870.CS101
             get { return _pi; }
         }
 
-        private List<Parameter> _parameters;
+        private Parameter[] _parameters;
 
-        public WriteParameters(ushort sn, ParameterIdentification pi, List<Parameter> parameters) : base(0)
+        public WriteParameters(ushort sn, ParameterIdentification pi, Parameter[] parameters) : base(0)
         {
             _sn = sn;
             _pi = pi;

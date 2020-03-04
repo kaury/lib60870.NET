@@ -2031,7 +2031,7 @@ namespace lib60870.CS104
             SendASDUInternal(asdu);
 
         }
-        public void WriteParameters(CauseOfTransmission cot, int ca, ushort sn, ParameterIdentification pi, List<Parameter> parameters)
+        public void WriteParameters(CauseOfTransmission cot, int ca, ushort sn, ParameterIdentification pi, Parameter[] parameters)
         {
             ASDU asdu = new ASDU(alParameters, cot, false, false, (byte)alParameters.OA, ca, false);//CauseOfTransmission.ACTIVATION \ CauseOfTransmission.DEACTIVATION
 
