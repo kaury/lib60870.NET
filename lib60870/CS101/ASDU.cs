@@ -971,7 +971,7 @@ namespace lib60870.CS101
 
                 /* 41 - 44 reserved */
 
-                case TypeID.M_FT_NA_1:/* 42 - 104-œ∏‘Ú*/
+                case TypeID.M_FT_NA_1:/* 42 104-2009œ∏‘Ú*/
 
                     retVal = new EventOfFault(parameters, payload, 0);
 
@@ -1255,8 +1255,71 @@ namespace lib60870.CS101
 
                 /* 114 - 119 reserved */
 
-                case TypeID.F_FR_NA_1_210:
+                /* 200 - 203 206 207 210 211 104-2009œ∏‘Ú*/
+                case TypeID.C_SR_NA_1: //200
+
+                    retVal = new SwitchSettingArea(parameters, payload, 0);
+
+                    break;
+
+                case TypeID.C_RR_NA_1: //201
+
+                    retVal = new ReadCurrentSettingArea(parameters, payload, 0);
+
+                    break;
+
+                case TypeID.C_RS_NA_1: //202
+
+                    retVal = new ReadParameters(parameters, payload, 0, NumberOfElements);
+
+                    break;
+
+                case TypeID.C_WS_NA_1: //203
+
+                    retVal = new WriteParameters(parameters, payload, 0);
+
+                    break;
+
+                case TypeID.M_IT_NB_1: //206
+
+                    elementSize = 5;
+
+                    if (IsSequence)
+                    {
+                        int ioa = InformationObject.ParseInformationObjectAddress(parameters, payload, 0);
+
+                        retVal = new IntegratedTotalsShort(parameters, payload, parameters.SizeOfIOA + (index * elementSize), true);
+
+                        retVal.ObjectAddress = ioa + index;
+
+                    }
+                    else
+                        retVal = new IntegratedTotalsShort(parameters, payload, index * (parameters.SizeOfIOA + elementSize), false);
+
+                    break;
+
+                case TypeID.M_IT_TC_1: //207
+
+                    elementSize = 12;
+
+                    if (IsSequence)
+                    {
+                        int ioa = InformationObject.ParseInformationObjectAddress(parameters, payload, 0);
+
+                        retVal = new IntegratedTotalsShortWithCP56Time2a(parameters, payload, parameters.SizeOfIOA + (index * elementSize), true);
+
+                        retVal.ObjectAddress = ioa + index;
+
+                    }
+                    else
+                        retVal = new IntegratedTotalsShortWithCP56Time2a(parameters, payload, index * (parameters.SizeOfIOA + elementSize), false);
+
+                    break;
+
+                case TypeID.F_FR_NA_1_210: //210
+
                     var fobj = new FileObjects210(parameters, payload, 0);
+
                     if (fobj.OPT == OptionID.CALL_FILES)
                     {
                         retVal = new FileCall(parameters, payload, 0);
@@ -1301,6 +1364,13 @@ namespace lib60870.CS101
                     {
                         retVal = fobj;
                     }
+
+                    break;
+
+                case TypeID.F_SR_NA_1_211:
+
+                    retVal = new SoftwareUpdateCommand(parameters, payload, 0);
+
                     break;
 
                 default:

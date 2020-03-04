@@ -43,6 +43,9 @@
   <ItemGroup>
     <Compile Include="CS101\EventOfFault.cs" />
     <Compile Include="CS101\FileObjects210.cs" />
+    <Compile Include="CS101\IntegratedTotalsShort.cs" />
+    <Compile Include="CS101\RemoteParameter.cs" />
+    <Compile Include="CS101\SoftwareUpdateCommand.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="CP56Time2a.cs" />
     <Compile Include="SystemUtils.cs" />
