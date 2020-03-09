@@ -852,6 +852,14 @@ namespace lib60870.CS104
 
             SendASDUInternal(asdu);
         }
+        public void SendReadClockCommand(int ca)
+        {
+            ASDU asdu = new ASDU(alParameters, CauseOfTransmission.REQUEST, false, false, (byte)alParameters.OA, ca, false);
+
+            asdu.AddInformationObject(new ClockSynchronizationCommand(0,new CP56Time2a()));
+
+            SendASDUInternal(asdu);
+        }
 
         /// <summary>
         /// Sends a test command (C_TS_NA_1 typeID: 104).
