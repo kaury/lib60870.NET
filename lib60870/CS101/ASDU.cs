@@ -1412,7 +1412,7 @@ namespace lib60870.CS101
         {
             string ret;
 
-            ret = "TypeID: " + typeId.ToString() + " COT: " + cot.ToString();
+            ret = "TypeID: " + typeId.ToString() + $"({(int)typeId})" + " COT: " + cot.ToString();
 
             if (parameters.SizeOfCOT == 2)
                 ret += " OA: " + oa;
