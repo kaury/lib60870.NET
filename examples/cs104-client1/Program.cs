@@ -126,7 +126,10 @@ namespace cs104_client1
                 if (asdu.Cot == CauseOfTransmission.ACTIVATION_CON)
                     Console.WriteLine((asdu.IsNegative ? "Negative" : "Positive") + "confirmation for interrogation command");
                 else if (asdu.Cot == CauseOfTransmission.ACTIVATION_TERMINATION)
+                {
                     Console.WriteLine("Interrogation command terminated");
+                    con.SendClockSyncCommand(1, new CP56Time2a(DateTime.Now));
+                }
             }
             else if (asdu.TypeId == TypeID.F_DR_TA_1)
             {
@@ -185,7 +188,7 @@ namespace cs104_client1
             }
             else if (asdu.TypeId == TypeID.M_EI_NA_1)
             {
-
+                con.SendInterrogationCommand(CauseOfTransmission.ACTIVATION, 1, QualifierOfInterrogation.STATION);
             }
             else
             {
@@ -229,11 +232,12 @@ namespace cs104_client1
 
             con.Connect();
 
-            Thread.Sleep(5000);
+            Thread.Sleep(1000);
 
-            con.SendInterrogationCommand(CauseOfTransmission.ACTIVATION, 1, QualifierOfInterrogation.STATION);
+            //con.SendInterrogationCommand(CauseOfTransmission.ACTIVATION, 1, QualifierOfInterrogation.STATION);
             
             Console.ReadKey();
+            return;
 
             con.GetFile(1, 0, "soe", new Receiver());
 
