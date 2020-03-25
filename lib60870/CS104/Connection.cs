@@ -856,7 +856,7 @@ namespace lib60870.CS104
         {
             ASDU asdu = new ASDU(alParameters, CauseOfTransmission.REQUEST, false, false, (byte)alParameters.OA, ca, false);
 
-            asdu.AddInformationObject(new ClockSynchronizationCommand(0,new CP56Time2a()));
+            asdu.AddInformationObject(new ClockSynchronizationCommand(0, new CP56Time2a()));
 
             SendASDUInternal(asdu);
         }
@@ -1368,7 +1368,7 @@ namespace lib60870.CS104
                     statistics.SentMsgCounter++;
                     if (sentMessageHandler != null)
                     {
-                        sentMessageHandler(sentMessageHandlerParameter, TESTFR_CON_MSG, 6);
+                        sentMessageHandler(sentMessageHandlerParameter, TESTFR_CON_MSG, TESTFR_CON_MSG.Length);
                     }
 
                 }
@@ -1387,7 +1387,7 @@ namespace lib60870.CS104
                     statistics.SentMsgCounter++;
                     if (sentMessageHandler != null)
                     {
-                        sentMessageHandler(sentMessageHandlerParameter, STARTDT_CON_MSG, 6);
+                        sentMessageHandler(sentMessageHandlerParameter, STARTDT_CON_MSG, STARTDT_CON_MSG.Length);
                     }
                 }
                 else if (buffer[2] == 0x0b)
@@ -1517,12 +1517,12 @@ namespace lib60870.CS104
                     ResetT3Timeout();
                     if (sentMessageHandler != null)
                     {
-                        sentMessageHandler(sentMessageHandlerParameter, TESTFR_ACT_MSG, 6);
+                        sentMessageHandler(sentMessageHandlerParameter, TESTFR_ACT_MSG, TESTFR_ACT_MSG.Length);
                     }
                 }
             }
 
-            if (unconfirmedReceivedIMessages > 0)
+            if (unconfirmedReceivedIMessages > 0)//> apciParameters.W
             {
                 if (checkConfirmTimeout((long)currentTime))
                 {
@@ -1552,6 +1552,7 @@ namespace lib60870.CS104
 
                     if (((long)currentTime - sentASDUs[oldestSentASDU].sentTime) >= (apciParameters.T1 * 1000))
                     {
+                        DebugLog("I message T1 timeout");
                         return false;
                     }
                 }
@@ -1774,6 +1775,7 @@ namespace lib60870.CS104
                                         {
                                             /* close connection on error */
                                             loopRunning = false;
+                                            DebugLog("checkMessage() = false");
                                         }
                                     }
 
@@ -1790,20 +1792,30 @@ namespace lib60870.CS104
                                     suspendThread = false;
                                 }
                                 else if (bytesRec == -1)
+                                {
                                     loopRunning = false;
-
+                                    DebugLog("bytesRec == -1.");
+                                }
 
                                 if (handleTimeouts() == false)
+                                {
                                     loopRunning = false;
-
+                                    DebugLog("handleTimeouts() == false");
+                                }
                                 if (fileClient != null)
                                     fileClient.HandleFileService();
 
                                 if (isConnected() == false)
+                                {
                                     loopRunning = false;
+                                    DebugLog("isConnected() == false");
+                                }
 
                                 if (running == false)
+                                {
                                     loopRunning = false;
+                                    DebugLog("running == false");
+                                }
 
                                 if (useSendMessageQueue)
                                 {
@@ -1815,8 +1827,9 @@ namespace lib60870.CS104
                                     Thread.Sleep(1);
 
                             }
-                            catch (SocketException)
+                            catch (SocketException e)
                             {
+                                DebugLog("SocketException: " + e.ToString());
                                 loopRunning = false;
                             }
                             catch (System.IO.IOException e)
@@ -1824,8 +1837,9 @@ namespace lib60870.CS104
                                 DebugLog("IOException: " + e.ToString());
                                 loopRunning = false;
                             }
-                            catch (ConnectionException)
+                            catch (ConnectionException e)
                             {
+                                DebugLog("ConnectionException: " + e.ToString());
                                 loopRunning = false;
                             }
                         }
