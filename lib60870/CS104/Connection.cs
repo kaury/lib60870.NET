@@ -1553,7 +1553,7 @@ namespace lib60870.CS104
                     if (((long)currentTime - sentASDUs[oldestSentASDU].sentTime) >= (apciParameters.T1 * 1000))
                     {
                         DebugLog("I message T1 timeout");
-                        return false;
+                        return true;// return false;
                     }
                 }
             }
